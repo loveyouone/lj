@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>白名单管理系统</title>
+    <style>
+        :root {
+            --primary-color: #3498db;
+            --secondary-color: #2980b9;
+            --success-color: #2ecc71;
+            --danger-color: #e74c3c;
+            --dark-color: #2c3e50;
+            --light-color: #ecf0f1;
+            --gray-color: #95a5a6;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1, h2, h3 {
+            margin-bottom: 1rem;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        }
+        
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+        
+        input[type="text"],
+        input[type="password"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: var(--secondary-color);
+        }
+        
+        .btn-danger {
+            background-color: var(--danger-color);
+        }
+        
+        .btn-danger:hover {
+            background-color: #c0392b;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        th {
+            background-color: #f8f9fa;
+            font-weight: 600;
+        }
+        
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 1.5rem;
+        }
+        
+        .alert-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .alert-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .login-container {
+            max-width: 400px;
+            margin: 100px auto;
+            padding: 2rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        .api-info {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: monospace;
+            word-break: break-all;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .tab-container {
+            margin-bottom: 1.5rem;
+        }
+        
+        .tab {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #e9ecef;
+            cursor: pointer;
+            border-radius: 4px 4px 0 0;
+            margin-right: 5px;
+        }
+        
+        .tab.active {
+            background-color: white;
+            border-bottom: 2px solid var(--primary-color);
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            th, td {
+                padding: 8px 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 登录界面 -->
+        <div id="loginPage" class="login-container">
+            <h2>白名单管理系统</h2>
+            <div class="form-group">
+                <label for="username">用户名</label>
+                <input type="text" id="username" placeholder="请输入管理员用户名">
+            </div>
+            <div class="form-group">
+                <label for="password">密码</label>
+                <input type="password" id="password" placeholder="请输入密码">
+            </div>
+            <button onclick="login()">登录</button>
+            <div id="loginError" class="alert alert-error hidden">用户名或密码错误</div>
+        </div>
+
+        <!-- 主界面 -->
+        <div id="mainPage" class="hidden">
+            <header>
+                <h1>白名单管理系统</h1>
+                <p>管理允许访问脚本的用户列表</p>
+            </header>
+
+            <div class="tab-container">
+                <div class="tab active" onclick="switchTab('manage')">用户管理</div>
+                <div class="tab" onclick="switchTab('api')">API信息</div>
+                <div class="tab" onclick="switchTab('settings')">设置</div>
+                <div style="float: right;">
+                    <button onclick="logout()">退出登录</button>
+                </div>
+            </div>
+
+            <div id="manageTab" class="tab-content active">
+                <div class="card">
+                    <h2>添加用户到白名单</h2>
+                    <div class="form-group">
+                        <label for="newUsername">用户名</label>
+                        <input type="text" id="newUsername" placeholder="输入用户名">
+                    </div>
+                    <button onclick="addUser()">添加用户</button>
+                    <div id="addUserSuccess" class="alert alert-success hidden">用户添加成功</div>
+                    <div id="addUserError" class="alert alert-error hidden"></div>
+                </div>
+
+                <div class="card">
+                    <h2>白名单用户列表</h2>
+                    <table id="usersTable">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>用户名</th>
+                                <th>添加时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- 用户数据将通过JavaScript动态填充 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="apiTab" class="tab-content">
+                <div class="card">
+                    <h2>API访问信息</h2>
+                    <p>您的Lua脚本可以使用以下URL来验证白名单：</p>
+                    <div class="api-info" id="apiUrl">https://yourdomain.com/whitelist/api.php?key=YOUR_API_KEY</div>
+                    <p>在Lua脚本中，将<code>WHITELIST_URL</code>替换为此URL。</p>
+                    
+                    <h3>API密钥管理</h3>
+                    <div class="api-info" id="currentApiKey">当前API密钥: ****************</div>
+                    <button onclick="generateNewApiKey()">生成新的API密钥</button>
+                    <div id="apiKeySuccess" class="alert alert-success hidden">API密钥已更新</div>
+                </div>
+            </div>
+
+            <div id="settingsTab" class="tab-content">
+                <div class="card">
+                    <h2>系统设置</h2>
+                    <div class="form-group">
+                        <label for="adminPassword">更改管理员密码</label>
+                        <input type="password" id="adminPassword" placeholder="新密码">
+                    </div>
+                    <button onclick="changePassword()">更改密码</button>
+                    <div id="passwordSuccess" class="alert alert-success hidden">密码已更新</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 模拟数据库 - 在实际应用中应使用真实数据库
+        let whitelistUsers = JSON.parse(localStorage.getItem('whitelistUsers')) || [
+            {id: 1, username: "mmm", added: "2023-05-10"},
+            {id: 2, username: "Player2", added: "2023-05-12"},
+            {id: 3, username: "Player3", added: "2023-05-15"}
+        ];
+        
+        let adminCredentials = JSON.parse(localStorage.getItem('adminCredentials')) || {
+            username: "admin",
+            password: "admin123",
+            apiKey: "secure_api_key_12345"
+        };
+        
+        // 页面加载时初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 检查是否已登录
+            if (localStorage.getItem('isLoggedIn') === 'true') {
+                showMainPage();
+            } else {
+                showLoginPage();
+            }
+            
+            renderUsersTable();
+            document.getElementById('apiUrl').textContent = 
+                window.location.origin + "/whitelist/api.php?key=" + adminCredentials.apiKey;
+        });
+        
+        function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            if (username === adminCredentials.username && password === adminCredentials.password) {
+                localStorage.setItem('isLoggedIn', 'true');
+                showMainPage();
+            } else {
+                document.getElementById('loginError').classList.remove('hidden');
+            }
+        }
+        
+        function logout() {
+            localStorage.setItem('isLoggedIn', 'false');
+            showLoginPage();
+        }
+        
+        function showLoginPage() {
+            document.getElementById('loginPage').classList.remove('hidden');
+            document.getElementById('mainPage').classList.add('hidden');
+        }
+        
+        function showMainPage() {
+            document.getElementById('loginPage').classList.add('hidden');
+            document.getElementById('mainPage').classList.remove('hidden');
+        }
+        
+        function switchTab(tabName) {
+            // 隐藏所有标签内容
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // 取消所有标签的活动状态
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // 显示选中的标签内容
+            document.getElementById(tabName + 'Tab').classList.add('active');
+            
+            // 设置选中的标签为活动状态
+            event.target.classList.add('active');
+        }
+        
+        function addUser() {
+            const newUsername = document.getElementById('newUsername').value.trim();
+            
+            if (!newUsername) {
+                showError('addUserError', '请输入用户名');
+                return;
+            }
+            
+            // 检查用户是否已存在
+            if (whitelistUsers.some(user => user.username === newUsername)) {
+                showError('addUserError', '该用户已在白名单中');
+                return;
+            }
+            
+            // 添加新用户
+            const newUser = {
+                id: whitelistUsers.length > 0 ? Math.max(...whitelistUsers.map(u => u.id)) + 1 : 1,
+                username: newUsername,
+                added: new Date().toLocaleDateString()
+            };
+            
+            whitelistUsers.push(newUser);
+            saveUsersToStorage();
+            renderUsersTable();
+            
+            // 显示成功消息
+            document.getElementById('addUserSuccess').classList.remove('hidden');
+            document.getElementById('addUserError').classList.add('hidden');
+            document.getElementById('newUsername').value = '';
+            
+            // 3秒后隐藏成功消息
+            setTimeout(() => {
+                document.getElementById('addUserSuccess').classList.add('hidden');
+            }, 3000);
+        }
+        
+        function removeUser(userId) {
+            if (confirm('确定要从白名单中移除该用户吗？')) {
+                whitelistUsers = whitelistUsers.filter(user => user.id !== userId);
+                saveUsersToStorage();
+                renderUsersTable();
+            }
+        }
+        
+        function renderUsersTable() {
+            const tbody = document.querySelector('#usersTable tbody');
+            tbody.innerHTML = '';
+            
+            whitelistUsers.forEach(user => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${user.id}</td>
+                    <td>${user.username}</td>
+                    <td>${user.added}</td>
+                    <td>
+                        <button class="btn-danger" onclick="removeUser(${user.id})">移除</button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+        
+        function saveUsersToStorage() {
+            localStorage.setItem('whitelistUsers', JSON.stringify(whitelistUsers));
+        }
+        
+        function generateNewApiKey() {
+            const newApiKey = generateRandomKey(20);
+            adminCredentials.apiKey = newApiKey;
+            localStorage.setItem('adminCredentials', JSON.stringify(adminCredentials));
+            
+            document.getElementById('apiUrl').textContent = 
+                window.location.origin + "/whitelist/api.php?key=" + adminCredentials.apiKey;
+            
+            // 显示成功消息
+            document.getElementById('apiKeySuccess').classList.remove('hidden');
+            
+            // 3秒后隐藏成功消息
+            setTimeout(() => {
+                document.getElementById('apiKeySuccess').classList.add('hidden');
+            }, 3000);
+        }
+        
+        function changePassword() {
+            const newPassword = document.getElementById('adminPassword').value;
+            
+            if (!newPassword) {
+                alert('请输入新密码');
+                return;
+            }
+            
+            adminCredentials.password = newPassword;
+            localStorage.setItem('adminCredentials', JSON.stringify(adminCredentials));
+            
+            document.getElementById('adminPassword').value = '';
+            
+            // 显示成功消息
+            document.getElementById('passwordSuccess').classList.remove('hidden');
+            
+            // 3秒后隐藏成功消息
+            setTimeout(() => {
+                document.getElementById('passwordSuccess').classList.add('hidden');
+            }, 3000);
+        }
+        
+        function generateRandomKey(length) {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            let result = '';
+            for (let i = 0; i < length; i++) {
+                result += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return result;
+        }
+        
+        function showError(elementId, message) {
+            const errorElement = document.getElementById(elementId);
+            errorElement.textContent = message;
+            errorElement.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
