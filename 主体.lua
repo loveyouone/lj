@@ -10,15 +10,15 @@ local Window = WindUI:CreateWindow({
 
 Window:ToggleTransparency(true)
 
--- ===== 移动增强 =====
-local MoveTab = Window:Tab({
-    Title = "移动增强",
-    Icon = "settings"
+-- ===== 基础功能 =====
+local MainTab = Window:Tab({
+    Title = "基础功能",
+    Icon = "home"
 })
 
 local infJumpEnabled = false
 local infJumpConn
-MoveTab:Toggle({
+MainTab:Toggle({
     Title = "无限跳跃",
     Callback = function(v)
         infJumpEnabled = v
@@ -47,7 +47,7 @@ MoveTab:Toggle({
 
 local noClipEnabled = false
 local noClipConn
-MoveTab:Toggle({
+MainTab:Toggle({
     Title = "穿墙",
     Callback = function(v)
         noClipEnabled = v
@@ -85,7 +85,7 @@ MoveTab:Toggle({
 
 local xrayEnabled = false
 local xrayConn
-MoveTab:Toggle({
+MainTab:Toggle({
     Title = "透视",
     Callback = function(v)
         xrayEnabled = v
@@ -121,7 +121,7 @@ MoveTab:Toggle({
     end
 })
 
-MoveTab:Slider({
+MainTab:Slider({
     Title = "移动速度",
     Step = 1,
     Value = {
@@ -140,7 +140,7 @@ MoveTab:Slider({
     end
 })
 
-MoveTab:Slider({
+MainTab:Slider({
     Title = "跳跃高度",
     Step = 1,
     Value = {
@@ -159,17 +159,74 @@ MoveTab:Slider({
     end
 })
 
+-- 分隔线
+MainTab:Divider()
+
+-- 自动捡枪功能
+local autoGunEnabled = false
+local autoGunConn
+local savedGunPos = nil
+
+MainTab:Toggle({
+    Title = "自动捡枪",
+    Callback = function(v)
+        autoGunEnabled = v
+        if v then
+            if not autoGunConn then
+                autoGunConn = game:GetService("RunService").Heartbeat:Connect(function()
+                    if autoGunEnabled then
+                        local char = game.Players.LocalPlayer.Character
+                        if char then
+                            local hrp = char:FindFirstChild("HumanoidRootPart")
+                            if hrp then
+                                local gunDrop = workspace:FindFirstChild("GunDrop", true)
+                                if gunDrop then
+                                    local part = gunDrop:IsA("BasePart") and gunDrop or gunDrop:FindFirstChildWhichIsA("BasePart")
+                                    if part then
+                                        if not savedGunPos then
+                                            savedGunPos = hrp.CFrame
+                                        end
+                                        hrp.CFrame = part.CFrame
+                                        task.wait(0.3)
+                                        if savedGunPos then
+                                            hrp.CFrame = savedGunPos
+                                            savedGunPos = nil
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end)
+            end
+        else
+            if autoGunConn then
+                autoGunConn:Disconnect()
+                autoGunConn = nil
+                savedGunPos = nil
+            end
+        end
+    end
+})
+
 -- ===== 透视 =====
 local EspTab = Window:Tab({
     Title = "透视",
     Icon = "eye"
 })
 
-local espEnabled = false
-local espCleanup = nil
-local espConnections = {}
+-- ESP 状态和资源（完全局部化，不依赖 _G）
+local espState = {
+    running = false,
+    heartbeatConn = nil,
+    playerAddedConn = nil,
+    playerRemovingConn = nil,
+    playerEspData = {},
+    gunEspData = nil,
+    gunDropCache = nil,
+}
 
--- 彻底清理所有ESP对象
+-- 销毁所有ESP对象
 local function destroyAllESPObjects()
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("BillboardGui") and (obj.Name == "ESP_Tag" or obj.Name == "DroppedGunESP") then
@@ -181,388 +238,406 @@ local function destroyAllESPObjects()
     end
 end
 
+-- 停止ESP（彻底清理）
+local function stopESP()
+    if espState.heartbeatConn then
+        espState.heartbeatConn:Disconnect()
+        espState.heartbeatConn = nil
+    end
+    if espState.playerAddedConn then
+        espState.playerAddedConn:Disconnect()
+        espState.playerAddedConn = nil
+    end
+    if espState.playerRemovingConn then
+        espState.playerRemovingConn:Disconnect()
+        espState.playerRemovingConn = nil
+    end
+    
+    -- 清理玩家ESP数据
+    for player, data in pairs(espState.playerEspData) do
+        if data.highlight then data.highlight:Destroy() end
+        if data.billboard then data.billboard:Destroy() end
+    end
+    espState.playerEspData = {}
+    
+    -- 清理枪支ESP
+    if espState.gunEspData then
+        if espState.gunEspData.highlight then espState.gunEspData.highlight:Destroy() end
+        if espState.gunEspData.billboard then espState.gunEspData.billboard:Destroy() end
+        espState.gunEspData = nil
+    end
+    espState.gunDropCache = nil
+    
+    destroyAllESPObjects()
+    espState.running = false
+end
+
+local espEnabled = false
+
 EspTab:Toggle({
     Title = "开启透视",
     Callback = function(v)
         espEnabled = v
         
         if v then
-            -- 开启透视
-            if not _G.ESP_RUNNING then
-                _G.ESP_RUNNING = true
-                
-                local Players = game:GetService("Players")
-                local RunService = game:GetService("RunService")
-                local Workspace = game:GetService("Workspace")
-                local LocalPlayer = Players.LocalPlayer
+            -- 如果已经运行则先停止
+            if espState.running then
+                stopESP()
+            end
+            
+            local Players = game:GetService("Players")
+            local RunService = game:GetService("RunService")
+            local Workspace = game:GetService("Workspace")
+            local LocalPlayer = Players.LocalPlayer
 
-                if not LocalPlayer then
-                    repeat task.wait() until Players.LocalPlayer
-                    LocalPlayer = Players.LocalPlayer
-                end
+            if not LocalPlayer then
+                repeat task.wait() until Players.LocalPlayer
+                LocalPlayer = Players.LocalPlayer
+            end
 
-                -- 先清理旧对象
-                destroyAllESPObjects()
+            -- 清理旧对象
+            destroyAllESPObjects()
 
-                local PLAYER_COLORS = {
-                    KNIFE = Color3.fromRGB(255, 50, 50),
-                    GUN = Color3.fromRGB(50, 180, 255),
-                    CIVILIAN = Color3.fromRGB(50, 255, 100)
-                }
+            local PLAYER_COLORS = {
+                KNIFE = Color3.fromRGB(255, 50, 50),
+                GUN = Color3.fromRGB(50, 180, 255),
+                CIVILIAN = Color3.fromRGB(50, 255, 100)
+            }
 
-                local PLAYER_TEXT_COLORS = {
-                    KNIFE = Color3.fromRGB(255, 180, 180),
-                    GUN = Color3.fromRGB(180, 220, 255),
-                    CIVILIAN = Color3.fromRGB(180, 255, 180)
-                }
+            local PLAYER_TEXT_COLORS = {
+                KNIFE = Color3.fromRGB(255, 180, 180),
+                GUN = Color3.fromRGB(180, 220, 255),
+                CIVILIAN = Color3.fromRGB(180, 255, 180)
+            }
 
-                local playerEspData = {}
+            local playerEspData = {}
 
-                local function getPlayerWeaponType(player)
-                    if not player then return "CIVILIAN" end
-                    local backpack = player:FindFirstChild("Backpack")
-                    if backpack then
-                        for _, child in ipairs(backpack:GetChildren()) do
-                            if child:IsA("Tool") then
-                                if child.Name == "Knife" then return "KNIFE" end
-                                if child.Name == "Gun" then return "GUN" end
-                            end
-                        end
-                    end
-                    local character = player.Character
-                    if character then
-                        for _, child in ipairs(character:GetChildren()) do
-                            if child:IsA("Tool") then
-                                if child.Name == "Knife" then return "KNIFE" end
-                                if child.Name == "Gun" then return "GUN" end
-                            end
-                        end
-                    end
-                    return "CIVILIAN"
-                end
-
-                local function createPlayerESP(player)
-                    if playerEspData[player] then return end
-                    local character = player.Character
-                    if not character then return end
-                    local rootPart = character:FindFirstChild("HumanoidRootPart")
-                    if not rootPart then return end
-
-                    local highlight = Instance.new("Highlight")
-                    highlight.Name = "PlayerHighlight"
-                    highlight.FillTransparency = 1
-                    highlight.OutlineTransparency = 0
-                    highlight.Parent = character
-                    highlight.Adornee = character
-
-                    local billboard = Instance.new("BillboardGui")
-                    billboard.Name = "ESP_Tag"
-                    billboard.Size = UDim2.new(0, 110, 0, 26)
-                    billboard.StudsOffset = Vector3.new(0, 3, 0)
-                    billboard.MaxDistance = 0
-                    billboard.AlwaysOnTop = true
-                    billboard.Parent = rootPart
-
-                    local frame = Instance.new("Frame")
-                    frame.Size = UDim2.new(1, 0, 1, 0)
-                    frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-                    frame.BackgroundTransparency = 0.3
-                    frame.BorderSizePixel = 0
-                    frame.Parent = billboard
-
-                    local corner = Instance.new("UICorner")
-                    corner.CornerRadius = UDim.new(0, 8)
-                    corner.Parent = frame
-
-                    local layout = Instance.new("UIListLayout")
-                    layout.FillDirection = Enum.FillDirection.Horizontal
-                    layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-                    layout.VerticalAlignment = Enum.VerticalAlignment.Center
-                    layout.Padding = UDim.new(0, 4)
-                    layout.Parent = frame
-
-                    local textLabel = Instance.new("TextLabel")
-                    textLabel.Size = UDim2.new(0, 60, 0, 20)
-                    textLabel.BackgroundTransparency = 1
-                    textLabel.Text = "平民"
-                    textLabel.TextColor3 = PLAYER_TEXT_COLORS.CIVILIAN
-                    textLabel.TextSize = 12
-                    textLabel.Font = Enum.Font.GothamMedium
-                    textLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-                    textLabel.TextStrokeTransparency = 0.2
-                    textLabel.TextXAlignment = Enum.TextXAlignment.Left
-                    textLabel.Parent = frame
-
-                    local distLabel = Instance.new("TextLabel")
-                    distLabel.Size = UDim2.new(0, 35, 0, 20)
-                    distLabel.BackgroundTransparency = 1
-                    distLabel.Text = "0m"
-                    distLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-                    distLabel.TextSize = 11
-                    distLabel.Font = Enum.Font.GothamMedium
-                    distLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-                    distLabel.TextStrokeTransparency = 0.2
-                    distLabel.TextXAlignment = Enum.TextXAlignment.Right
-                    distLabel.Parent = frame
-
-                    playerEspData[player] = {
-                        highlight = highlight,
-                        billboard = billboard,
-                        textLabel = textLabel,
-                        distLabel = distLabel,
-                        weaponType = "CIVILIAN"
-                    }
-                end
-
-                local function updatePlayerESP(player)
-                    local data = playerEspData[player]
-                    if not data then return end
-
-                    local weaponType = getPlayerWeaponType(player)
-                    if data.weaponType == weaponType then return end
-
-                    data.weaponType = weaponType
-
-                    local borderColor = PLAYER_COLORS[weaponType]
-                    local textColor = PLAYER_TEXT_COLORS[weaponType]
-                    local labelText = weaponType == "KNIFE" and "杀手" or weaponType == "GUN" and "警长" or "平民"
-
-                    data.highlight.OutlineColor = borderColor
-                    data.textLabel.Text = labelText
-                    data.textLabel.TextColor3 = textColor
-                end
-
-                local function updatePlayerDistance(player, data)
-                    if not player or not data then return end
-                    local localChar = LocalPlayer.Character
-                    if not localChar then return end
-                    local localRoot = localChar:FindFirstChild("HumanoidRootPart")
-                    if not localRoot then return end
-
-                    local targetChar = player.Character
-                    if not targetChar then return end
-                    local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
-                    if not targetRoot then return end
-
-                    local dist = (localRoot.Position - targetRoot.Position).Magnitude
-                    data.distLabel.Text = string.format("%.0fm", dist)
-                end
-
-                local function cleanPlayerESP(player)
-                    local data = playerEspData[player]
-                    if data then
-                        if data.highlight then data.highlight:Destroy() end
-                        if data.billboard then data.billboard:Destroy() end
-                        playerEspData[player] = nil
-                    end
-                end
-
-                local function setupPlayerESP(player)
-                    if player == LocalPlayer then return end
-                    if playerEspData[player] then return end
-
-                    local character = player.Character
-                    if not character then
-                        player.CharacterAdded:Connect(function()
-                            task.wait(0.1)
-                            setupPlayerESP(player)
-                        end)
-                        return
-                    end
-
-                    createPlayerESP(player)
-                    updatePlayerESP(player)
-
-                    local function onBackpackChanged()
-                        updatePlayerESP(player)
-                    end
-
-                    local backpack = player:FindFirstChild("Backpack")
-                    if backpack then
-                        backpack.ChildAdded:Connect(onBackpackChanged)
-                        backpack.ChildRemoved:Connect(onBackpackChanged)
-                    end
-
-                    local function onCharacterChildChanged(child)
+            local function getPlayerWeaponType(player)
+                if not player then return "CIVILIAN" end
+                local backpack = player:FindFirstChild("Backpack")
+                if backpack then
+                    for _, child in ipairs(backpack:GetChildren()) do
                         if child:IsA("Tool") then
-                            updatePlayerESP(player)
+                            if child.Name == "Knife" then return "KNIFE" end
+                            if child.Name == "Gun" then return "GUN" end
                         end
                     end
-                    character.ChildAdded:Connect(onCharacterChildChanged)
-                    character.ChildRemoved:Connect(onCharacterChildChanged)
+                end
+                local character = player.Character
+                if character then
+                    for _, child in ipairs(character:GetChildren()) do
+                        if child:IsA("Tool") then
+                            if child.Name == "Knife" then return "KNIFE" end
+                            if child.Name == "Gun" then return "GUN" end
+                        end
+                    end
+                end
+                return "CIVILIAN"
+            end
 
+            local function createPlayerESP(player)
+                if playerEspData[player] then return end
+                local character = player.Character
+                if not character then return end
+                local rootPart = character:FindFirstChild("HumanoidRootPart")
+                if not rootPart then return end
+
+                local highlight = Instance.new("Highlight")
+                highlight.Name = "PlayerHighlight"
+                highlight.FillTransparency = 1
+                highlight.OutlineTransparency = 0
+                highlight.Parent = character
+                highlight.Adornee = character
+
+                local billboard = Instance.new("BillboardGui")
+                billboard.Name = "ESP_Tag"
+                billboard.Size = UDim2.new(0, 110, 0, 26)
+                billboard.StudsOffset = Vector3.new(0, 3, 0)
+                billboard.MaxDistance = 0
+                billboard.AlwaysOnTop = true
+                billboard.Parent = rootPart
+
+                local frame = Instance.new("Frame")
+                frame.Size = UDim2.new(1, 0, 1, 0)
+                frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+                frame.BackgroundTransparency = 0.3
+                frame.BorderSizePixel = 0
+                frame.Parent = billboard
+
+                local corner = Instance.new("UICorner")
+                corner.CornerRadius = UDim.new(0, 8)
+                corner.Parent = frame
+
+                local layout = Instance.new("UIListLayout")
+                layout.FillDirection = Enum.FillDirection.Horizontal
+                layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+                layout.VerticalAlignment = Enum.VerticalAlignment.Center
+                layout.Padding = UDim.new(0, 4)
+                layout.Parent = frame
+
+                local textLabel = Instance.new("TextLabel")
+                textLabel.Size = UDim2.new(0, 60, 0, 20)
+                textLabel.BackgroundTransparency = 1
+                textLabel.Text = "平民"
+                textLabel.TextColor3 = PLAYER_TEXT_COLORS.CIVILIAN
+                textLabel.TextSize = 12
+                textLabel.Font = Enum.Font.GothamMedium
+                textLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+                textLabel.TextStrokeTransparency = 0.2
+                textLabel.TextXAlignment = Enum.TextXAlignment.Left
+                textLabel.Parent = frame
+
+                local distLabel = Instance.new("TextLabel")
+                distLabel.Size = UDim2.new(0, 35, 0, 20)
+                distLabel.BackgroundTransparency = 1
+                distLabel.Text = "0m"
+                distLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+                distLabel.TextSize = 11
+                distLabel.Font = Enum.Font.GothamMedium
+                distLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+                distLabel.TextStrokeTransparency = 0.2
+                distLabel.TextXAlignment = Enum.TextXAlignment.Right
+                distLabel.Parent = frame
+
+                playerEspData[player] = {
+                    highlight = highlight,
+                    billboard = billboard,
+                    textLabel = textLabel,
+                    distLabel = distLabel,
+                    weaponType = "CIVILIAN"
+                }
+            end
+
+            local function updatePlayerESP(player)
+                local data = playerEspData[player]
+                if not data then return end
+
+                local weaponType = getPlayerWeaponType(player)
+                if data.weaponType == weaponType then return end
+
+                data.weaponType = weaponType
+
+                local borderColor = PLAYER_COLORS[weaponType]
+                local textColor = PLAYER_TEXT_COLORS[weaponType]
+                local labelText = weaponType == "KNIFE" and "杀手" or weaponType == "GUN" and "警长" or "平民"
+
+                data.highlight.OutlineColor = borderColor
+                data.textLabel.Text = labelText
+                data.textLabel.TextColor3 = textColor
+            end
+
+            local function updatePlayerDistance(player, data)
+                if not player or not data then return end
+                local localChar = LocalPlayer.Character
+                if not localChar then return end
+                local localRoot = localChar:FindFirstChild("HumanoidRootPart")
+                if not localRoot then return end
+
+                local targetChar = player.Character
+                if not targetChar then return end
+                local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+                if not targetRoot then return end
+
+                local dist = (localRoot.Position - targetRoot.Position).Magnitude
+                data.distLabel.Text = string.format("%.0fm", dist)
+            end
+
+            local function cleanPlayerESP(player)
+                local data = playerEspData[player]
+                if data then
+                    if data.highlight then data.highlight:Destroy() end
+                    if data.billboard then data.billboard:Destroy() end
+                    playerEspData[player] = nil
+                end
+            end
+
+            local function setupPlayerESP(player)
+                if player == LocalPlayer then return end
+                if playerEspData[player] then return end
+
+                local character = player.Character
+                if not character then
                     player.CharacterAdded:Connect(function()
-                        task.wait(0.2)
-                        cleanPlayerESP(player)
+                        task.wait(0.1)
                         setupPlayerESP(player)
                     end)
+                    return
                 end
 
-                for _, player in ipairs(Players:GetPlayers()) do
-                    if player ~= LocalPlayer then
-                        pcall(setupPlayerESP, player)
+                createPlayerESP(player)
+                updatePlayerESP(player)
+
+                local function onBackpackChanged()
+                    updatePlayerESP(player)
+                end
+
+                local backpack = player:FindFirstChild("Backpack")
+                if backpack then
+                    backpack.ChildAdded:Connect(onBackpackChanged)
+                    backpack.ChildRemoved:Connect(onBackpackChanged)
+                end
+
+                local function onCharacterChildChanged(child)
+                    if child:IsA("Tool") then
+                        updatePlayerESP(player)
                     end
                 end
+                character.ChildAdded:Connect(onCharacterChildChanged)
+                character.ChildRemoved:Connect(onCharacterChildChanged)
 
-                local playerAddedConn = Players.PlayerAdded:Connect(function(player)
-                    if player == LocalPlayer then return end
+                player.CharacterAdded:Connect(function()
+                    task.wait(0.2)
+                    cleanPlayerESP(player)
+                    setupPlayerESP(player)
+                end)
+            end
+
+            -- 初始化现有玩家
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer then
                     pcall(setupPlayerESP, player)
-                end)
-
-                local playerRemovingConn = Players.PlayerRemoving:Connect(cleanPlayerESP)
-
-                local gunEspData = nil
-                local gunDropCache = nil
-
-                local function clearGunESP()
-                    if gunEspData then
-                        if gunEspData.highlight then gunEspData.highlight:Destroy() end
-                        if gunEspData.billboard then gunEspData.billboard:Destroy() end
-                        gunEspData = nil
-                    end
-                    gunDropCache = nil
                 end
+            end
 
-                local function createGunESP(gunDrop)
-                    clearGunESP()
+            local playerAddedConn = Players.PlayerAdded:Connect(function(player)
+                if player == LocalPlayer then return end
+                pcall(setupPlayerESP, player)
+            end)
 
-                    local gunPart = nil
-                    if gunDrop:IsA("BasePart") then
-                        gunPart = gunDrop
-                    else
-                        gunPart = gunDrop:FindFirstChild("HumanoidRootPart")
-                        if not gunPart then
-                            for _, child in ipairs(gunDrop:GetDescendants()) do
-                                if child:IsA("BasePart") then
-                                    gunPart = child
-                                    break
-                                end
+            local playerRemovingConn = Players.PlayerRemoving:Connect(cleanPlayerESP)
+
+            -- 枪支ESP
+            local gunEspData = nil
+            local gunDropCache = nil
+
+            local function clearGunESP()
+                if gunEspData then
+                    if gunEspData.highlight then gunEspData.highlight:Destroy() end
+                    if gunEspData.billboard then gunEspData.billboard:Destroy() end
+                    gunEspData = nil
+                end
+                gunDropCache = nil
+            end
+
+            local function createGunESP(gunDrop)
+                clearGunESP()
+
+                local gunPart = nil
+                if gunDrop:IsA("BasePart") then
+                    gunPart = gunDrop
+                else
+                    gunPart = gunDrop:FindFirstChild("HumanoidRootPart")
+                    if not gunPart then
+                        for _, child in ipairs(gunDrop:GetDescendants()) do
+                            if child:IsA("BasePart") then
+                                gunPart = child
+                                break
                             end
                         end
                     end
-
-                    if not gunPart then return false end
-
-                    local gunModel = gunDrop
-
-                    local highlight = Instance.new("Highlight")
-                    highlight.Name = "DroppedGunHighlight"
-                    highlight.FillColor = Color3.fromRGB(255, 200, 50)
-                    highlight.OutlineColor = Color3.fromRGB(255, 200, 50)
-                    highlight.FillTransparency = 1
-                    highlight.OutlineTransparency = 0
-                    highlight.Parent = gunModel
-                    highlight.Adornee = gunModel
-
-                    local billboard = Instance.new("BillboardGui")
-                    billboard.Name = "DroppedGunESP"
-                    billboard.Size = UDim2.new(0, 110, 0, 28)
-                    billboard.StudsOffset = Vector3.new(0, 2.5, 0)
-                    billboard.MaxDistance = 200
-                    billboard.AlwaysOnTop = true
-                    billboard.Parent = gunPart
-
-                    local frame = Instance.new("Frame")
-                    frame.Size = UDim2.new(1, 0, 1, 0)
-                    frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-                    frame.BackgroundTransparency = 0.3
-                    frame.BorderSizePixel = 0
-                    frame.Parent = billboard
-
-                    local corner = Instance.new("UICorner")
-                    corner.CornerRadius = UDim.new(0, 8)
-                    corner.Parent = frame
-
-                    local textLabel = Instance.new("TextLabel")
-                    textLabel.Size = UDim2.new(1, 0, 1, 0)
-                    textLabel.BackgroundTransparency = 1
-                    textLabel.Text = "枪"
-                    textLabel.TextColor3 = Color3.fromRGB(255, 220, 100)
-                    textLabel.TextSize = 13
-                    textLabel.Font = Enum.Font.GothamBold
-                    textLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-                    textLabel.TextStrokeTransparency = 0.2
-                    textLabel.TextXAlignment = Enum.TextXAlignment.Center
-                    textLabel.TextYAlignment = Enum.TextYAlignment.Center
-                    textLabel.Parent = frame
-
-                    gunEspData = {
-                        highlight = highlight,
-                        billboard = billboard,
-                        textLabel = textLabel,
-                        part = gunPart,
-                        model = gunModel
-                    }
-                    gunDropCache = gunDrop
-                    return true
                 end
 
-                local function updateGunESP()
-                    local gunDrop = Workspace:FindFirstChild("GunDrop", true)
+                if not gunPart then return false end
 
-                    if gunDrop then
-                        if gunDropCache ~= gunDrop then
-                            clearGunESP()
-                            createGunESP(gunDrop)
-                        end
+                local gunModel = gunDrop
 
-                        if gunEspData and gunEspData.part and gunEspData.part.Parent then
-                            local localChar = LocalPlayer.Character
-                            if localChar then
-                                local localRoot = localChar:FindFirstChild("HumanoidRootPart")
-                                if localRoot then
-                                    local dist = (localRoot.Position - gunEspData.part.Position).Magnitude
-                                    gunEspData.textLabel.Text = string.format("枪 (%.0fm)", dist)
-                                end
-                            end
-                        end
-                    else
-                        if gunDropCache then
-                            clearGunESP()
-                        end
-                    end
-                end
+                local highlight = Instance.new("Highlight")
+                highlight.Name = "DroppedGunHighlight"
+                highlight.FillColor = Color3.fromRGB(255, 200, 50)
+                highlight.OutlineColor = Color3.fromRGB(255, 200, 50)
+                highlight.FillTransparency = 1
+                highlight.OutlineTransparency = 0
+                highlight.Parent = gunModel
+                highlight.Adornee = gunModel
 
-                local heartbeatConn = RunService.Heartbeat:Connect(function()
-                    for player, data in pairs(playerEspData) do
-                        pcall(updatePlayerDistance, player, data)
-                    end
-                    pcall(updateGunESP)
-                end)
+                local billboard = Instance.new("BillboardGui")
+                billboard.Name = "DroppedGunESP"
+                billboard.Size = UDim2.new(0, 110, 0, 28)
+                billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+                billboard.MaxDistance = 200
+                billboard.AlwaysOnTop = true
+                billboard.Parent = gunPart
 
-                -- 保存所有连接
-                _G.ESP_CONNECTIONS = {
-                    heartbeat = heartbeatConn,
-                    playerAdded = playerAddedConn,
-                    playerRemoving = playerRemovingConn,
+                local frame = Instance.new("Frame")
+                frame.Size = UDim2.new(1, 0, 1, 0)
+                frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+                frame.BackgroundTransparency = 0.3
+                frame.BorderSizePixel = 0
+                frame.Parent = billboard
+
+                local corner = Instance.new("UICorner")
+                corner.CornerRadius = UDim.new(0, 8)
+                corner.Parent = frame
+
+                local textLabel = Instance.new("TextLabel")
+                textLabel.Size = UDim2.new(1, 0, 1, 0)
+                textLabel.BackgroundTransparency = 1
+                textLabel.Text = "枪"
+                textLabel.TextColor3 = Color3.fromRGB(255, 220, 100)
+                textLabel.TextSize = 13
+                textLabel.Font = Enum.Font.GothamBold
+                textLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+                textLabel.TextStrokeTransparency = 0.2
+                textLabel.TextXAlignment = Enum.TextXAlignment.Center
+                textLabel.TextYAlignment = Enum.TextYAlignment.Center
+                textLabel.Parent = frame
+
+                gunEspData = {
+                    highlight = highlight,
+                    billboard = billboard,
+                    textLabel = textLabel,
+                    part = gunPart,
+                    model = gunModel
                 }
-                _G.ESP_PLAYER_DATA = playerEspData
-                _G.ESP_CLEANUP = function()
-                    heartbeatConn:Disconnect()
-                    playerAddedConn:Disconnect()
-                    playerRemovingConn:Disconnect()
-                    for player, data in pairs(playerEspData) do
-                        cleanPlayerESP(player)
+                gunDropCache = gunDrop
+                return true
+            end
+
+            local function updateGunESP()
+                local gunDrop = Workspace:FindFirstChild("GunDrop", true)
+
+                if gunDrop then
+                    if gunDropCache ~= gunDrop then
+                        clearGunESP()
+                        createGunESP(gunDrop)
                     end
-                    clearGunESP()
-                    destroyAllESPObjects()
-                    _G.ESP_RUNNING = false
-                    _G.ESP_CONNECTIONS = nil
-                    _G.ESP_CLEANUP = nil
-                    _G.ESP_PLAYER_DATA = nil
+
+                    if gunEspData and gunEspData.part and gunEspData.part.Parent then
+                        local localChar = LocalPlayer.Character
+                        if localChar then
+                            local localRoot = localChar:FindFirstChild("HumanoidRootPart")
+                            if localRoot then
+                                local dist = (localRoot.Position - gunEspData.part.Position).Magnitude
+                                gunEspData.textLabel.Text = string.format("枪 (%.0fm)", dist)
+                            end
+                        end
+                    end
+                else
+                    if gunDropCache then
+                        clearGunESP()
+                    end
                 end
             end
+
+            local heartbeatConn = RunService.Heartbeat:Connect(function()
+                for player, data in pairs(playerEspData) do
+                    pcall(updatePlayerDistance, player, data)
+                end
+                pcall(updateGunESP)
+            end)
+
+            -- 保存状态
+            espState.running = true
+            espState.heartbeatConn = heartbeatConn
+            espState.playerAddedConn = playerAddedConn
+            espState.playerRemovingConn = playerRemovingConn
+            espState.playerEspData = playerEspData
+            espState.gunEspData = gunEspData
+            espState.gunDropCache = gunDropCache
+            
         else
-            -- 关闭透视：彻底清理所有ESP
-            destroyAllESPObjects()
-            if _G.ESP_CLEANUP then
-                _G.ESP_CLEANUP()
-            end
-            -- 确保全局状态被重置
-            _G.ESP_RUNNING = false
-            _G.ESP_CONNECTIONS = nil
-            _G.ESP_CLEANUP = nil
-            _G.ESP_PLAYER_DATA = nil
+            -- 关闭透视：彻底清理所有资源
+            stopESP()
         end
     end
 })
