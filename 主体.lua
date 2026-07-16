@@ -498,7 +498,7 @@ EspTab:Toggle({
                 local textColor = PLAYER_TEXT_COLORS[weaponType]
                 local labelText = weaponType == "KNIFE" and "杀手" or weaponType == "GUN" and "警长" or "平民"
                 data.highlight.OutlineColor = borderColor
-                data.textLabel.Text = labelText
+                    data.textLabel.Text = labelText
                 data.textLabel.TextColor3 = textColor
             end
 
@@ -998,7 +998,7 @@ BulletTab:Toggle({
         if v then
             local playerGui = game.Players.LocalPlayer:WaitForChild("PlayerGui")
             local screenGui = Instance.new("ScreenGui")
-            screenGui.Name = "AimBot"
+                screenGui.Name = "AimBot"
             screenGui.Parent = playerGui
             screenGui.ResetOnSpawn = false
 
