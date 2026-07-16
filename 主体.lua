@@ -805,12 +805,14 @@ BulletTab:Toggle({
 
 local targetMode = "Sheriff"
 
-BulletTab:Choice({
+BulletTab:Dropdown({
     Title = "投掷目标模式",
+    Desc = "选择投掷匕首的优先目标",
     Values = { "优先警长", "距离最近" },
-    Default = "优先警长",
+    Value = { "优先警长" },
+    Multi = false,
     Callback = function(selected)
-        if selected == "优先警长" then
+        if selected[1] == "优先警长" then
             targetMode = "Sheriff"
         else
             targetMode = "Nearest"
@@ -886,7 +888,7 @@ local function doKnifeThrow()
 end
 
 BulletTab:Toggle({
-    Title = "飞刀投掷追踪",
+    Title = "开启飞刀投掷追踪",
     Callback = function(v)
         knifeThrowEnabled = v
         if v then
@@ -963,14 +965,14 @@ BulletTab:Toggle({
             end
         end
     end
-end})
+})
 
 game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.KeyCode == Enum.KeyCode.T and knifeThrowEnabled then
         doKnifeThrow()
     end
-end) 
+end)
 
 local TeleportTab = Window:Tab({
     Title = "传送",
