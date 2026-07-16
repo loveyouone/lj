@@ -1098,4 +1098,4 @@ MurderTab:Toggle({
             end
         end
     end
-end})
+})
