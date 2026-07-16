@@ -963,7 +963,7 @@ BulletTab:Toggle({
             end
         end
     end
-})
+end})
 
 game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
