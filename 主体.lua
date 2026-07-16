@@ -1,16 +1,13 @@
--- 加载 WindUI 库
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 WindUI:SetNotificationLower(true)
 
--- 窗口
 local Window = WindUI:CreateWindow({
-    Title = "MM2 工具集",
-    Author = "by 用户"
+    Title = "MM2 脚本",
+    Author = "by 弋月"
 })
 
 Window:ToggleTransparency(true)
 
--- ===== 基础功能 =====
 local MainTab = Window:Tab({
     Title = "基础功能",
     Icon = "house"
@@ -86,7 +83,7 @@ MainTab:Toggle({
 local xrayEnabled = false
 local xrayConn
 MainTab:Toggle({
-    Title = "透视",
+    Title = "地图透视",
     Callback = function(v)
         xrayEnabled = v
         if v then
@@ -159,10 +156,8 @@ MainTab:Slider({
     end
 })
 
--- 分隔线
 MainTab:Divider()
 
--- 自动捡枪功能
 local autoGunEnabled = false
 local autoGunConn
 local savedGunPos = nil
@@ -209,7 +204,54 @@ MainTab:Toggle({
     end
 })
 
--- ===== 透视（完全重构） =====
+local antiFlingEnabled = false
+local antiFlingConn
+local lastPosition = nil
+
+MainTab:Toggle({
+    Title = "反甩飞（测试中可能无效或bug）",
+    Callback = function(v)
+        antiFlingEnabled = v
+        if v then
+            if not antiFlingConn then
+                antiFlingConn = game:GetService("RunService").Heartbeat:Connect(function()
+                    if antiFlingEnabled then
+                        local char = game.Players.LocalPlayer.Character
+                        if char then
+                            local hrp = char:FindFirstChild("HumanoidRootPart")
+                            if hrp then
+                                local currentPos = hrp.Position
+                                local vel = hrp.AssemblyLinearVelocity
+                            
+                                if vel.Magnitude > 1000 then
+                                    hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                                end
+                               
+                                if lastPosition then
+                                    local dist = (currentPos - lastPosition).Magnitude
+                                    if dist > 200 then
+                                        hrp.CFrame = CFrame.new(lastPosition)
+                                        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                                    end
+                                end
+                                lastPosition = currentPos
+                            end
+                        end
+                    else
+                        lastPosition = nil
+                    end
+                end)
+            end
+        else
+            if antiFlingConn then
+                antiFlingConn:Disconnect()
+                antiFlingConn = nil
+                lastPosition = nil
+            end
+        end
+    end
+})
+
 local EspTab = Window:Tab({
     Title = "透视",
     Icon = "eye"
@@ -405,12 +447,10 @@ EspTab:Toggle({
                     connections = {},
                 }
 
-                -- 绑定监听
                 local function update()
                     updatePlayerESP(player)
                 end
 
-                -- Backpack 变化
                 local backpack = player:FindFirstChild("Backpack")
                 if backpack then
                     local conn1 = backpack.ChildAdded:Connect(update)
@@ -418,7 +458,7 @@ EspTab:Toggle({
                     table.insert(data.connections, conn1)
                     table.insert(data.connections, conn2)
                 end
-                -- 监听 Backpack 被创建（如果还没有）
+
                 local conn3 = player.ChildAdded:Connect(function(child)
                     if child.Name == "Backpack" then
                         child.ChildAdded:Connect(update)
@@ -428,7 +468,6 @@ EspTab:Toggle({
                 end)
                 table.insert(data.connections, conn3)
 
-                -- Character 工具变化
                 local conn4 = character.ChildAdded:Connect(function(child)
                     if child:IsA("Tool") then update() end
                 end)
@@ -438,7 +477,6 @@ EspTab:Toggle({
                 table.insert(data.connections, conn4)
                 table.insert(data.connections, conn5)
 
-                -- Character 重生
                 local conn6 = player.CharacterAdded:Connect(function()
                     task.wait(0.2)
                     cleanPlayerESP(player)
@@ -492,7 +530,6 @@ EspTab:Toggle({
                 createPlayerESP(player)
             end
 
-            -- 初始化现有玩家
             for _, player in ipairs(Players:GetPlayers()) do
                 if player ~= LocalPlayer then
                     pcall(setupPlayerESP, player)
@@ -506,7 +543,6 @@ EspTab:Toggle({
 
             espData.playerRemovingConn = Players.PlayerRemoving:Connect(cleanPlayerESP)
 
-            -- 枪支ESP
             local function clearGunESP()
                 if espData.gunEsp then
                     if espData.gunEsp.highlight then espData.gunEsp.highlight:Destroy() end
@@ -619,13 +655,334 @@ EspTab:Toggle({
 
             espData.running = true
         else
-            -- 关闭透视：彻底清理
             stopESP()
         end
     end
 })
 
--- ===== 子弹追踪 =====
+-- ===== 子弹追踪标签页 =====
+local BulletTab = Window:Tab({
+    Title = "子弹追踪",
+    Icon = "crosshair"
+})
+
+-- ===== 1. 警长射击 =====
+local bulletEnabled = false
+local shootGui = nil
+
+BulletTab:Toggle({
+    Title = "开启子弹追踪（警长射击）",
+    Callback = function(v)
+        bulletEnabled = v
+        if v then
+            -- 创建射击按钮（沿用之前的逻辑）
+            local playerGui = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+            local screenGui = Instance.new("ScreenGui")
+            screenGui.Name = "AimBot"
+            screenGui.Parent = playerGui
+            screenGui.ResetOnSpawn = false
+
+            local button = Instance.new("TextButton")
+            button.Size = UDim2.new(0, 90, 0, 50)
+            button.Position = UDim2.new(0.5, -45, 0.5, -25)
+            button.Text = "射击"
+            button.TextColor3 = Color3.fromRGB(200, 200, 200)
+            button.TextSize = 18
+            button.Font = Enum.Font.GothamMedium
+            button.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            button.BackgroundTransparency = 0.5
+            button.BorderSizePixel = 0
+            button.TextTransparency = 0.3
+            button.Parent = screenGui
+
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0, 12)
+            corner.Parent = button
+
+            -- 拖拽逻辑（触摸）
+            local isDragging = false
+            local isPressed = false
+            local dragStartPos = nil
+            local startButtonPos = nil
+
+            button.InputBegan:Connect(function(input, gameProcessed)
+                if gameProcessed then return end
+                if input.UserInputType == Enum.UserInputType.Touch then
+                    isPressed = true
+                    dragStartPos = input.Position
+                    startButtonPos = button.Position
+                    isDragging = false
+                end
+            end)
+
+            button.InputChanged:Connect(function(input, gameProcessed)
+                if gameProcessed then return end
+                if input.UserInputType == Enum.UserInputType.Touch and isPressed then
+                    local delta = input.Position - dragStartPos
+                    if delta.Magnitude > 10 then
+                        isDragging = true
+                        button.Position = UDim2.new(
+                            startButtonPos.X.Scale,
+                            startButtonPos.X.Offset + delta.X,
+                            startButtonPos.Y.Scale,
+                            startButtonPos.Y.Offset + delta.Y
+                        )
+                    end
+                end
+            end)
+
+            button.InputEnded:Connect(function(input, gameProcessed)
+                if gameProcessed then return end
+                if input.UserInputType == Enum.UserInputType.Touch then
+                    if not isDragging then
+                        -- 射击逻辑（瞄准躯干）
+                        local function getMurderer()
+                            for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
+                                if player ~= game.Players.LocalPlayer then
+                                    local char = player.Character
+                                    local backpack = player:FindFirstChild("Backpack")
+                                    if (backpack and backpack:FindFirstChild("Knife")) or (char and char:FindFirstChild("Knife")) then
+                                        return player
+                                    end
+                                end
+                            end
+                            return nil
+                        end
+
+                        local function getMurdererPosition()
+                            local murderer = getMurderer()
+                            if not murderer then return nil end
+                            local char = murderer.Character
+                            if not char then return nil end
+                            local root = char:FindFirstChild("HumanoidRootPart")
+                            if not root then return nil end
+                            return root.Position - Vector3.new(0, 1, 0)
+                        end
+
+                        local function hasGun()
+                            local backpack = game.Players.LocalPlayer:FindFirstChild("Backpack")
+                            local char = game.Players.LocalPlayer.Character
+                            return (backpack and backpack:FindFirstChild("Gun")) or (char and char:FindFirstChild("Gun"))
+                        end
+
+                        if not hasGun() then return end
+
+                        local targetPos = getMurdererPosition()
+                        if not targetPos then return end
+
+                        local char = game.Players.LocalPlayer.Character
+                        if not char then return end
+
+                        local gun = game.Players.LocalPlayer:FindFirstChild("Backpack") and game.Players.LocalPlayer.Backpack:FindFirstChild("Gun")
+                        if not gun then
+                            gun = char:FindFirstChild("Gun")
+                        end
+                        if not gun then return end
+
+                        local handle = gun:FindFirstChild("Handle")
+                        if not handle then return end
+
+                        local shootEvent = gun:FindFirstChild("Shoot")
+                        if not shootEvent then return end
+
+                        local gunPos = handle.Position
+                        local startCFrame = CFrame.lookAt(gunPos, targetPos)
+                        local targetCFrame = CFrame.new(targetPos)
+
+                        pcall(function()
+                            shootEvent:FireServer(startCFrame, targetCFrame)
+                        end)
+                    end
+                    isDragging = false
+                    isPressed = false
+                end
+            end)
+
+            shootGui = screenGui
+        else
+            if shootGui then
+                shootGui:Destroy()
+                shootGui = nil
+            end
+        end
+    end
+})
+
+-- ===== 2. 投掷目标模式选择框 =====
+local targetMode = "Sheriff" -- "Sheriff" 或 "Nearest"
+
+BulletTab:Choice({
+    Title = "投掷目标模式",
+    Desc = "选择优先攻击的目标类型",
+    Values = { "优先警长", "距离最近" },
+    Default = 1,
+    Callback = function(selected, index)
+        if index == 1 then
+            targetMode = "Sheriff"
+        else
+            targetMode = "Nearest"
+        end
+        print("[投掷] 目标模式切换为: " .. selected)
+    end
+})
+
+-- ===== 3. 杀手投掷 =====
+local knifeThrowEnabled = false
+local knifeGui = nil
+
+-- 投掷逻辑
+local function doKnifeThrow()
+    local char = game.Players.LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    local knife = nil
+    local backpack = game.Players.LocalPlayer:FindFirstChild("Backpack")
+    if backpack then knife = backpack:FindFirstChild("Knife") end
+    if not knife then knife = char:FindFirstChild("Knife") end
+    if not knife then
+        print("[投掷] 未持有刀")
+        return
+    end
+
+    local knifeThrown = knife:FindFirstChild("Events") and knife.Events:FindFirstChild("KnifeThrown")
+    if not knifeThrown then
+        print("[投掷] 未找到 KnifeThrown 事件")
+        return
+    end
+
+    -- 获取目标
+    local targets = {}
+    for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
+        if player ~= game.Players.LocalPlayer then
+            local pChar = player.Character
+            if pChar then
+                local pRoot = pChar:FindFirstChild("HumanoidRootPart")
+                if pRoot then
+                    local dist = (root.Position - pRoot.Position).Magnitude
+                    local isSheriff = false
+                    local pBackpack = player:FindFirstChild("Backpack")
+                    if pBackpack and pBackpack:FindFirstChild("Gun") then isSheriff = true end
+                    if pChar:FindFirstChild("Gun") then isSheriff = true end
+                    table.insert(targets, {player=player, root=pRoot, dist=dist, isSheriff=isSheriff})
+                end
+            end
+        end
+    end
+
+    if #targets == 0 then return end
+
+    local selected = nil
+    if targetMode == "Sheriff" then
+        for _, t in ipairs(targets) do
+            if t.isSheriff then
+                selected = t
+                break
+            end
+        end
+        if not selected then
+            table.sort(targets, function(a,b) return a.dist < b.dist end)
+            selected = targets[1]
+        end
+    else
+        table.sort(targets, function(a,b) return a.dist < b.dist end)
+        selected = targets[1]
+    end
+
+    if not selected then return end
+
+    local startPos = root.Position + Vector3.new(0, 1.5, 0)
+    local targetPos = selected.root.Position
+    local startCFrame = CFrame.lookAt(startPos, targetPos)
+    local targetCFrame = CFrame.new(targetPos)
+
+    pcall(function()
+        knifeThrown:FireServer(startCFrame, targetCFrame)
+        print("[投掷] 已投掷至 " .. selected.player.Name)
+    end)
+end
+
+BulletTab:Toggle({
+    Title = "开启投掷（杀手）",
+    Callback = function(v)
+        knifeThrowEnabled = v
+        if v then
+            local playerGui = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+            local screenGui = Instance.new("ScreenGui")
+            screenGui.Name = "KnifeThrowUI"
+            screenGui.Parent = playerGui
+            screenGui.ResetOnSpawn = false
+
+            local button = Instance.new("TextButton")
+            button.Size = UDim2.new(0, 90, 0, 50)
+            button.Position = UDim2.new(0.5, 45, 0.5, -25)
+            button.Text = "投掷"
+            button.TextColor3 = Color3.fromRGB(200, 200, 200)
+            button.TextSize = 18
+            button.Font = Enum.Font.GothamMedium
+            button.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            button.BackgroundTransparency = 0.5
+            button.BorderSizePixel = 0
+            button.TextTransparency = 0.3
+            button.Parent = screenGui
+
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0, 12)
+            corner.Parent = button
+
+            local isDragging = false
+            local isPressed = false
+            local dragStartPos = nil
+            local startButtonPos = nil
+
+            button.InputBegan:Connect(function(input, gameProcessed)
+                if gameProcessed then return end
+                if input.UserInputType == Enum.UserInputType.Touch then
+                    isPressed = true
+                    dragStartPos = input.Position
+                    startButtonPos = button.Position
+                    isDragging = false
+                end
+            end)
+
+            button.InputChanged:Connect(function(input, gameProcessed)
+                if gameProcessed then return end
+                if input.UserInputType == Enum.UserInputType.Touch and isPressed then
+                    local delta = input.Position - dragStartPos
+                    if delta.Magnitude > 10 then
+                        isDragging = true
+                        button.Position = UDim2.new(
+                            startButtonPos.X.Scale,
+                            startButtonPos.X.Offset + delta.X,
+                            startButtonPos.Y.Scale,
+                            startButtonPos.Y.Offset + delta.Y
+                        )
+                    end
+                end
+            end)
+
+            button.InputEnded:Connect(function(input, gameProcessed)
+                if gameProcessed then return end
+                if input.UserInputType == Enum.UserInputType.Touch then
+                    if not isDragging then
+                        doKnifeThrow()
+                    end
+                    isDragging = false
+                    isPressed = false
+                end
+            end)
+
+            knifeGui = screenGui
+        else
+            if knifeGui then
+                knifeGui:Destroy()
+                knifeGui = nil
+            end
+        end
+    end
+})
+
 local BulletTab = Window:Tab({
     Title = "子弹追踪",
     Icon = "crosshair"
@@ -697,7 +1054,6 @@ BulletTab:Toggle({
                 if gameProcessed then return end
                 if input.UserInputType == Enum.UserInputType.Touch then
                     if not isDragging then
-                        -- 射击逻辑（瞄准躯干）
                         local function getMurderer()
                             for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
                                 if player ~= game.Players.LocalPlayer then
@@ -718,7 +1074,6 @@ BulletTab:Toggle({
                             if not char then return nil end
                             local root = char:FindFirstChild("HumanoidRootPart")
                             if not root then return nil end
-                            -- 瞄准躯干（胸部）：向下偏移 1 单位
                             return root.Position - Vector3.new(0, 1, 0)
                         end
 
@@ -771,14 +1126,190 @@ BulletTab:Toggle({
     end
 })
 
--- ===== 传送 =====
+local targetMode = "Sheriff"
+
+BulletTab:Choice({
+    Title = "投掷模式",
+    Desc = "选择优先攻击的目标类型",
+    Values = { "优先警长", "距离最近" },
+    Default = 1,
+    Callback = function(selected, index)
+        if index == 1 then
+            targetMode = "Sheriff"
+        else
+            targetMode = "Nearest"
+        end
+    end
+})
+
+local knifeThrowEnabled = false
+local knifeGui = nil
+
+local function doKnifeThrow()
+    local char = game.Players.LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    local knife = nil
+    local backpack = game.Players.LocalPlayer:FindFirstChild("Backpack")
+    if backpack then knife = backpack:FindFirstChild("Knife") end
+    if not knife then knife = char:FindFirstChild("Knife") end
+    if not knife then return end
+
+    local knifeThrown = knife:FindFirstChild("Events") and knife.Events:FindFirstChild("KnifeThrown")
+    if not knifeThrown then return end
+
+    local targets = {}
+    for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
+        if player ~= game.Players.LocalPlayer then
+            local pChar = player.Character
+            if pChar then
+                local pRoot = pChar:FindFirstChild("HumanoidRootPart")
+                if pRoot then
+                    local dist = (root.Position - pRoot.Position).Magnitude
+                    local isSheriff = false
+                    local pBackpack = player:FindFirstChild("Backpack")
+                    if pBackpack and pBackpack:FindFirstChild("Gun") then isSheriff = true end
+                    if pChar:FindFirstChild("Gun") then isSheriff = true end
+                    table.insert(targets, {player=player, root=pRoot, dist=dist, isSheriff=isSheriff})
+                end
+            end
+        end
+    end
+
+    if #targets == 0 then return end
+
+    local selected = nil
+    if targetMode == "Sheriff" then
+        for _, t in ipairs(targets) do
+            if t.isSheriff then
+                selected = t
+                break
+            end
+        end
+        if not selected then
+            table.sort(targets, function(a,b) return a.dist < b.dist end)
+            selected = targets[1]
+        end
+    else
+        table.sort(targets, function(a,b) return a.dist < b.dist end)
+        selected = targets[1]
+    end
+
+    if not selected then return end
+
+    local startPos = root.Position + Vector3.new(0, 1.5, 0)
+    local targetPos = selected.root.Position
+    local startCFrame = CFrame.lookAt(startPos, targetPos)
+    local targetCFrame = CFrame.new(targetPos)
+
+    pcall(function()
+        knifeThrown:FireServer(startCFrame, targetCFrame)
+    end)
+end
+
+BulletTab:Toggle({
+    Title = "飞刀追踪",
+    Callback = function(v)
+        knifeThrowEnabled = v
+        if v then
+            local playerGui = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+            local screenGui = Instance.new("ScreenGui")
+            screenGui.Name = "KnifeThrowUI"
+            screenGui.Parent = playerGui
+            screenGui.ResetOnSpawn = false
+
+            local button = Instance.new("TextButton")
+            button.Size = UDim2.new(0, 90, 0, 50)
+            button.Position = UDim2.new(0.5, 45, 0.5, -25)
+            button.Text = "投掷"
+            button.TextColor3 = Color3.fromRGB(200, 200, 200)
+            button.TextSize = 18
+            button.Font = Enum.Font.GothamMedium
+            button.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            button.BackgroundTransparency = 0.5
+            button.BorderSizePixel = 0
+            button.TextTransparency = 0.3
+            button.Parent = screenGui
+
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0, 12)
+            corner.Parent = button
+
+            local isDragging = false
+            local isPressed = false
+            local dragStartPos = nil
+            local startButtonPos = nil
+
+            button.InputBegan:Connect(function(input, gameProcessed)
+                if gameProcessed then return end
+                if input.UserInputType == Enum.UserInputType.Touch then
+                    isPressed = true
+                    dragStartPos = input.Position
+                    startButtonPos = button.Position
+                    isDragging = false
+                end
+            end)
+
+            button.InputChanged:Connect(function(input, gameProcessed)
+                if gameProcessed then return end
+                if input.UserInputType == Enum.UserInputType.Touch and isPressed then
+                    local delta = input.Position - dragStartPos
+                    if delta.Magnitude > 10 then
+                        isDragging = true
+                        button.Position = UDim2.new(
+                            startButtonPos.X.Scale,
+                            startButtonPos.X.Offset + delta.X,
+                            startButtonPos.Y.Scale,
+                            startButtonPos.Y.Offset + delta.Y
+                        )
+                    end
+                end
+            end)
+
+            button.InputEnded:Connect(function(input, gameProcessed)
+                if gameProcessed then return end
+                if input.UserInputType == Enum.UserInputType.Touch then
+                    if not isDragging then
+                        doKnifeThrow()
+                    end
+                    isDragging = false
+                    isPressed = false
+                end
+            end)
+
+            knifeGui = screenGui
+        else
+            if knifeGui then
+                knifeGui:Destroy()
+                knifeGui = nil
+            end
+        end
+    end
+})
+
+game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.T and knifeThrowEnabled then
+        doKnifeThrow()
+    end
+end)
+
+game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.T and knifeThrowEnabled then
+        doKnifeThrow()
+    end
+end)
+
 local TeleportTab = Window:Tab({
     Title = "传送",
     Icon = "map-pin"
 })
 
 TeleportTab:Button({
-    Title = "传送到枪支",
+    Title = "传送到枪",
     Callback = function()
         local gunDrop = workspace:FindFirstChild("GunDrop", true)
         if gunDrop then
@@ -856,7 +1387,6 @@ TeleportTab:Button({
     end
 })
 
--- ===== 杀手功能 =====
 local MurderTab = Window:Tab({
     Title = "杀手功能",
     Icon = "skull"
@@ -866,39 +1396,9 @@ local killAllEnabled = false
 local killAllConn
 
 MurderTab:Toggle({
-    Title = "自动杀死全部玩家",
+    Title = "杀死全部玩家",
     Callback = function(v)
         killAllEnabled = v
         if v then
             if not killAllConn then
-                killAllConn = game:GetService("RunService").Heartbeat:Connect(function()
-                    if killAllEnabled then
-                        local localPlayer = game.Players.LocalPlayer
-                        local char = localPlayer.Character
-                        if char then
-                            local hrp = char:FindFirstChild("HumanoidRootPart")
-                            if hrp then
-                                for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
-                                    if player ~= localPlayer then
-                                        local targetChar = player.Character
-                                        if targetChar and targetChar:FindFirstChild("HumanoidRootPart") then
-                                            hrp.CFrame = targetChar.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
-                                            task.wait(0.1)
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end)
-            end
-        else
-            if killAllConn then
-                killAllConn:Disconnect()
-                killAllConn = nil
-            end
-        end
-    end
-})
-
-print("UI 加载完成")
+     
