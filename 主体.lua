@@ -13,7 +13,7 @@ Window:ToggleTransparency(true)
 -- ===== 基础功能 =====
 local MainTab = Window:Tab({
     Title = "基础功能",
-    Icon = "home"
+    Icon = "house"
 })
 
 local infJumpEnabled = false
@@ -215,7 +215,7 @@ local EspTab = Window:Tab({
     Icon = "eye"
 })
 
--- ESP 状态和资源（完全局部化，不依赖 _G）
+-- ESP 状态（完全局部化）
 local espState = {
     running = false,
     heartbeatConn = nil,
@@ -238,7 +238,22 @@ local function destroyAllESPObjects()
     end
 end
 
--- 停止ESP（彻底清理）
+-- 清理单个玩家的ESP和所有连接
+local function cleanPlayerESP(player)
+    local data = espState.playerEspData[player]
+    if data then
+        if data.highlight then data.highlight:Destroy() end
+        if data.billboard then data.billboard:Destroy() end
+        if data.connections then
+            for _, conn in ipairs(data.connections) do
+                conn:Disconnect()
+            end
+        end
+        espState.playerEspData[player] = nil
+    end
+end
+
+-- 停止ESP（彻底清理所有）
 local function stopESP()
     if espState.heartbeatConn then
         espState.heartbeatConn:Disconnect()
@@ -253,10 +268,9 @@ local function stopESP()
         espState.playerRemovingConn = nil
     end
     
-    -- 清理玩家ESP数据
-    for player, data in pairs(espState.playerEspData) do
-        if data.highlight then data.highlight:Destroy() end
-        if data.billboard then data.billboard:Destroy() end
+    -- 清理所有玩家ESP（包括连接）
+    for player, _ in pairs(espState.playerEspData) do
+        cleanPlayerESP(player)
     end
     espState.playerEspData = {}
     
@@ -280,7 +294,6 @@ EspTab:Toggle({
         espEnabled = v
         
         if v then
-            -- 如果已经运行则先停止
             if espState.running then
                 stopESP()
             end
@@ -295,7 +308,6 @@ EspTab:Toggle({
                 LocalPlayer = Players.LocalPlayer
             end
 
-            -- 清理旧对象
             destroyAllESPObjects()
 
             local PLAYER_COLORS = {
@@ -399,12 +411,45 @@ EspTab:Toggle({
                 distLabel.TextXAlignment = Enum.TextXAlignment.Right
                 distLabel.Parent = frame
 
+                local connections = {}
+                -- 监听背包变化
+                local function onBackpackChanged()
+                    updatePlayerESP(player)
+                end
+                local backpack = player:FindFirstChild("Backpack")
+                if backpack then
+                    local conn1 = backpack.ChildAdded:Connect(onBackpackChanged)
+                    local conn2 = backpack.ChildRemoved:Connect(onBackpackChanged)
+                    table.insert(connections, conn1)
+                    table.insert(connections, conn2)
+                end
+
+                -- 监听角色中工具变化
+                local function onCharacterChildChanged(child)
+                    if child:IsA("Tool") then
+                        updatePlayerESP(player)
+                    end
+                end
+                local conn3 = character.ChildAdded:Connect(onCharacterChildChanged)
+                local conn4 = character.ChildRemoved:Connect(onCharacterChildChanged)
+                table.insert(connections, conn3)
+                table.insert(connections, conn4)
+
+                -- 监听角色重生
+                local conn5 = player.CharacterAdded:Connect(function()
+                    task.wait(0.2)
+                    cleanPlayerESP(player)
+                    setupPlayerESP(player)
+                end)
+                table.insert(connections, conn5)
+
                 playerEspData[player] = {
                     highlight = highlight,
                     billboard = billboard,
                     textLabel = textLabel,
                     distLabel = distLabel,
-                    weaponType = "CIVILIAN"
+                    weaponType = "CIVILIAN",
+                    connections = connections,
                 }
             end
 
@@ -442,15 +487,6 @@ EspTab:Toggle({
                 data.distLabel.Text = string.format("%.0fm", dist)
             end
 
-            local function cleanPlayerESP(player)
-                local data = playerEspData[player]
-                if data then
-                    if data.highlight then data.highlight:Destroy() end
-                    if data.billboard then data.billboard:Destroy() end
-                    playerEspData[player] = nil
-                end
-            end
-
             local function setupPlayerESP(player)
                 if player == LocalPlayer then return end
                 if playerEspData[player] then return end
@@ -466,30 +502,6 @@ EspTab:Toggle({
 
                 createPlayerESP(player)
                 updatePlayerESP(player)
-
-                local function onBackpackChanged()
-                    updatePlayerESP(player)
-                end
-
-                local backpack = player:FindFirstChild("Backpack")
-                if backpack then
-                    backpack.ChildAdded:Connect(onBackpackChanged)
-                    backpack.ChildRemoved:Connect(onBackpackChanged)
-                end
-
-                local function onCharacterChildChanged(child)
-                    if child:IsA("Tool") then
-                        updatePlayerESP(player)
-                    end
-                end
-                character.ChildAdded:Connect(onCharacterChildChanged)
-                character.ChildRemoved:Connect(onCharacterChildChanged)
-
-                player.CharacterAdded:Connect(function()
-                    task.wait(0.2)
-                    cleanPlayerESP(player)
-                    setupPlayerESP(player)
-                end)
             end
 
             -- 初始化现有玩家
@@ -504,7 +516,9 @@ EspTab:Toggle({
                 pcall(setupPlayerESP, player)
             end)
 
-            local playerRemovingConn = Players.PlayerRemoving:Connect(cleanPlayerESP)
+            local playerRemovingConn = Players.PlayerRemoving:Connect(function(player)
+                cleanPlayerESP(player)
+            end)
 
             -- 枪支ESP
             local gunEspData = nil
@@ -714,6 +728,7 @@ BulletTab:Toggle({
                 if gameProcessed then return end
                 if input.UserInputType == Enum.UserInputType.Touch then
                     if not isDragging then
+                        -- 射击逻辑（瞄准躯干）
                         local function getMurderer()
                             for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
                                 if player ~= game.Players.LocalPlayer then
@@ -734,7 +749,8 @@ BulletTab:Toggle({
                             if not char then return nil end
                             local root = char:FindFirstChild("HumanoidRootPart")
                             if not root then return nil end
-                            return root.Position
+                            -- 瞄准躯干（胸部）：RootPart位置向下偏移1单位
+                            return root.Position - Vector3.new(0, 1, 0)
                         end
 
                         local function hasGun()
