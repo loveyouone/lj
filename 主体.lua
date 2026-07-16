@@ -10,9 +10,10 @@ local Window = WindUI:CreateWindow({
 
 Window:ToggleTransparency(true)
 
--- ===== 移动增强标签页 =====
+-- ===== 移动增强 =====
 local MoveTab = Window:Tab({
-    Title = "移动增强"
+    Title = "移动增强",
+    Icon = "settings"
 })
 
 local infJumpEnabled = false
@@ -158,20 +159,35 @@ MoveTab:Slider({
     end
 })
 
--- ===== 透视标签页 =====
+-- ===== 透视 =====
 local EspTab = Window:Tab({
-    Title = "透视"
+    Title = "透视",
+    Icon = "eye"
 })
 
 local espEnabled = false
 local espCleanup = nil
 local espConnections = {}
 
+-- 彻底清理所有ESP对象
+local function destroyAllESPObjects()
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BillboardGui") and (obj.Name == "ESP_Tag" or obj.Name == "DroppedGunESP") then
+            obj:Destroy()
+        end
+        if obj:IsA("Highlight") and (obj.Name == "PlayerHighlight" or obj.Name == "DroppedGunHighlight") then
+            obj:Destroy()
+        end
+    end
+end
+
 EspTab:Toggle({
     Title = "开启透视",
     Callback = function(v)
         espEnabled = v
+        
         if v then
+            -- 开启透视
             if not _G.ESP_RUNNING then
                 _G.ESP_RUNNING = true
                 
@@ -185,17 +201,8 @@ EspTab:Toggle({
                     LocalPlayer = Players.LocalPlayer
                 end
 
-                local function cleanAllESP()
-                    for _, obj in ipairs(Workspace:GetDescendants()) do
-                        if obj:IsA("BillboardGui") and (obj.Name == "ESP_Tag" or obj.Name == "DroppedGunESP") then
-                            obj:Destroy()
-                        end
-                        if obj:IsA("Highlight") and (obj.Name == "PlayerHighlight" or obj.Name == "DroppedGunHighlight") then
-                            obj:Destroy()
-                        end
-                    end
-                end
-                cleanAllESP()
+                -- 先清理旧对象
+                destroyAllESPObjects()
 
                 local PLAYER_COLORS = {
                     KNIFE = Color3.fromRGB(255, 50, 50),
@@ -523,7 +530,7 @@ EspTab:Toggle({
                     pcall(updateGunESP)
                 end)
 
-                -- 保存所有连接以便彻底清理
+                -- 保存所有连接
                 _G.ESP_CONNECTIONS = {
                     heartbeat = heartbeatConn,
                     playerAdded = playerAddedConn,
@@ -538,23 +545,32 @@ EspTab:Toggle({
                         cleanPlayerESP(player)
                     end
                     clearGunESP()
-                    cleanAllESP()
+                    destroyAllESPObjects()
+                    _G.ESP_RUNNING = false
+                    _G.ESP_CONNECTIONS = nil
+                    _G.ESP_CLEANUP = nil
+                    _G.ESP_PLAYER_DATA = nil
                 end
             end
         else
+            -- 关闭透视：彻底清理所有ESP
+            destroyAllESPObjects()
             if _G.ESP_CLEANUP then
                 _G.ESP_CLEANUP()
-                _G.ESP_RUNNING = false
-                _G.ESP_CONNECTIONS = nil
-                _G.ESP_CLEANUP = nil
             end
+            -- 确保全局状态被重置
+            _G.ESP_RUNNING = false
+            _G.ESP_CONNECTIONS = nil
+            _G.ESP_CLEANUP = nil
+            _G.ESP_PLAYER_DATA = nil
         end
     end
 })
 
--- ===== 子弹追踪标签页 =====
+-- ===== 子弹追踪 =====
 local BulletTab = Window:Tab({
-    Title = "子弹追踪"
+    Title = "子弹追踪",
+    Icon = "crosshair"
 })
 
 local bulletEnabled = false
@@ -695,9 +711,10 @@ BulletTab:Toggle({
     end
 })
 
--- ===== 传送标签页 =====
+-- ===== 传送 =====
 local TeleportTab = Window:Tab({
-    Title = "传送"
+    Title = "传送",
+    Icon = "map-pin"
 })
 
 TeleportTab:Button({
@@ -779,9 +796,10 @@ TeleportTab:Button({
     end
 })
 
--- ===== 杀手功能标签页 =====
+-- ===== 杀手功能 =====
 local MurderTab = Window:Tab({
-    Title = "杀手功能"
+    Title = "杀手功能",
+    Icon = "skull"
 })
 
 local killAllEnabled = false
