@@ -209,24 +209,23 @@ MainTab:Toggle({
     end
 })
 
--- ===== 透视 =====
+-- ===== 透视（完全重构） =====
 local EspTab = Window:Tab({
     Title = "透视",
     Icon = "eye"
 })
 
--- ESP 状态（完全局部化）
-local espState = {
+local espEnabled = false
+local espData = {
     running = false,
     heartbeatConn = nil,
     playerAddedConn = nil,
     playerRemovingConn = nil,
-    playerEspData = {},
-    gunEspData = nil,
-    gunDropCache = nil,
+    playerEspMap = {},
+    gunEsp = nil,
+    gunCache = nil,
 }
 
--- 销毁所有ESP对象
 local function destroyAllESPObjects()
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("BillboardGui") and (obj.Name == "ESP_Tag" or obj.Name == "DroppedGunESP") then
@@ -238,9 +237,8 @@ local function destroyAllESPObjects()
     end
 end
 
--- 清理单个玩家的ESP和所有连接
 local function cleanPlayerESP(player)
-    local data = espState.playerEspData[player]
+    local data = espData.playerEspMap[player]
     if data then
         if data.highlight then data.highlight:Destroy() end
         if data.billboard then data.billboard:Destroy() end
@@ -249,55 +247,45 @@ local function cleanPlayerESP(player)
                 conn:Disconnect()
             end
         end
-        espState.playerEspData[player] = nil
+        espData.playerEspMap[player] = nil
     end
 end
 
--- 停止ESP（彻底清理所有）
 local function stopESP()
-    if espState.heartbeatConn then
-        espState.heartbeatConn:Disconnect()
-        espState.heartbeatConn = nil
+    if espData.heartbeatConn then
+        espData.heartbeatConn:Disconnect()
+        espData.heartbeatConn = nil
     end
-    if espState.playerAddedConn then
-        espState.playerAddedConn:Disconnect()
-        espState.playerAddedConn = nil
+    if espData.playerAddedConn then
+        espData.playerAddedConn:Disconnect()
+        espData.playerAddedConn = nil
     end
-    if espState.playerRemovingConn then
-        espState.playerRemovingConn:Disconnect()
-        espState.playerRemovingConn = nil
+    if espData.playerRemovingConn then
+        espData.playerRemovingConn:Disconnect()
+        espData.playerRemovingConn = nil
     end
-    
-    -- 清理所有玩家ESP（包括连接）
-    for player, _ in pairs(espState.playerEspData) do
+    for player, _ in pairs(espData.playerEspMap) do
         cleanPlayerESP(player)
     end
-    espState.playerEspData = {}
-    
-    -- 清理枪支ESP
-    if espState.gunEspData then
-        if espState.gunEspData.highlight then espState.gunEspData.highlight:Destroy() end
-        if espState.gunEspData.billboard then espState.gunEspData.billboard:Destroy() end
-        espState.gunEspData = nil
+    espData.playerEspMap = {}
+    if espData.gunEsp then
+        if espData.gunEsp.highlight then espData.gunEsp.highlight:Destroy() end
+        if espData.gunEsp.billboard then espData.gunEsp.billboard:Destroy() end
+        espData.gunEsp = nil
     end
-    espState.gunDropCache = nil
-    
+    espData.gunCache = nil
     destroyAllESPObjects()
-    espState.running = false
+    espData.running = false
 end
-
-local espEnabled = false
 
 EspTab:Toggle({
     Title = "开启透视",
     Callback = function(v)
         espEnabled = v
-        
         if v then
-            if espState.running then
+            if espData.running then
                 stopESP()
             end
-            
             local Players = game:GetService("Players")
             local RunService = game:GetService("RunService")
             local Workspace = game:GetService("Workspace")
@@ -321,8 +309,6 @@ EspTab:Toggle({
                 GUN = Color3.fromRGB(180, 220, 255),
                 CIVILIAN = Color3.fromRGB(180, 255, 180)
             }
-
-            local playerEspData = {}
 
             local function getPlayerWeaponType(player)
                 if not player then return "CIVILIAN" end
@@ -348,7 +334,6 @@ EspTab:Toggle({
             end
 
             local function createPlayerESP(player)
-                if playerEspData[player] then return end
                 local character = player.Character
                 if not character then return end
                 local rootPart = character:FindFirstChild("HumanoidRootPart")
@@ -411,61 +396,69 @@ EspTab:Toggle({
                 distLabel.TextXAlignment = Enum.TextXAlignment.Right
                 distLabel.Parent = frame
 
-                local connections = {}
-                -- 监听背包变化
-                local function onBackpackChanged()
-                    updatePlayerESP(player)
-                end
-                local backpack = player:FindFirstChild("Backpack")
-                if backpack then
-                    local conn1 = backpack.ChildAdded:Connect(onBackpackChanged)
-                    local conn2 = backpack.ChildRemoved:Connect(onBackpackChanged)
-                    table.insert(connections, conn1)
-                    table.insert(connections, conn2)
-                end
-
-                -- 监听角色中工具变化
-                local function onCharacterChildChanged(child)
-                    if child:IsA("Tool") then
-                        updatePlayerESP(player)
-                    end
-                end
-                local conn3 = character.ChildAdded:Connect(onCharacterChildChanged)
-                local conn4 = character.ChildRemoved:Connect(onCharacterChildChanged)
-                table.insert(connections, conn3)
-                table.insert(connections, conn4)
-
-                -- 监听角色重生
-                local conn5 = player.CharacterAdded:Connect(function()
-                    task.wait(0.2)
-                    cleanPlayerESP(player)
-                    setupPlayerESP(player)
-                end)
-                table.insert(connections, conn5)
-
-                playerEspData[player] = {
+                local data = {
                     highlight = highlight,
                     billboard = billboard,
                     textLabel = textLabel,
                     distLabel = distLabel,
                     weaponType = "CIVILIAN",
-                    connections = connections,
+                    connections = {},
                 }
+
+                -- 绑定监听
+                local function update()
+                    updatePlayerESP(player)
+                end
+
+                -- Backpack 变化
+                local backpack = player:FindFirstChild("Backpack")
+                if backpack then
+                    local conn1 = backpack.ChildAdded:Connect(update)
+                    local conn2 = backpack.ChildRemoved:Connect(update)
+                    table.insert(data.connections, conn1)
+                    table.insert(data.connections, conn2)
+                end
+                -- 监听 Backpack 被创建（如果还没有）
+                local conn3 = player.ChildAdded:Connect(function(child)
+                    if child.Name == "Backpack" then
+                        child.ChildAdded:Connect(update)
+                        child.ChildRemoved:Connect(update)
+                        update()
+                    end
+                end)
+                table.insert(data.connections, conn3)
+
+                -- Character 工具变化
+                local conn4 = character.ChildAdded:Connect(function(child)
+                    if child:IsA("Tool") then update() end
+                end)
+                local conn5 = character.ChildRemoved:Connect(function(child)
+                    if child:IsA("Tool") then update() end
+                end)
+                table.insert(data.connections, conn4)
+                table.insert(data.connections, conn5)
+
+                -- Character 重生
+                local conn6 = player.CharacterAdded:Connect(function()
+                    task.wait(0.2)
+                    cleanPlayerESP(player)
+                    setupPlayerESP(player)
+                end)
+                table.insert(data.connections, conn6)
+
+                espData.playerEspMap[player] = data
+                updatePlayerESP(player)
             end
 
             local function updatePlayerESP(player)
-                local data = playerEspData[player]
+                local data = espData.playerEspMap[player]
                 if not data then return end
-
                 local weaponType = getPlayerWeaponType(player)
                 if data.weaponType == weaponType then return end
-
                 data.weaponType = weaponType
-
                 local borderColor = PLAYER_COLORS[weaponType]
                 local textColor = PLAYER_TEXT_COLORS[weaponType]
                 local labelText = weaponType == "KNIFE" and "杀手" or weaponType == "GUN" and "警长" or "平民"
-
                 data.highlight.OutlineColor = borderColor
                 data.textLabel.Text = labelText
                 data.textLabel.TextColor3 = textColor
@@ -477,20 +470,17 @@ EspTab:Toggle({
                 if not localChar then return end
                 local localRoot = localChar:FindFirstChild("HumanoidRootPart")
                 if not localRoot then return end
-
                 local targetChar = player.Character
                 if not targetChar then return end
                 local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
                 if not targetRoot then return end
-
                 local dist = (localRoot.Position - targetRoot.Position).Magnitude
                 data.distLabel.Text = string.format("%.0fm", dist)
             end
 
             local function setupPlayerESP(player)
                 if player == LocalPlayer then return end
-                if playerEspData[player] then return end
-
+                if espData.playerEspMap[player] then return end
                 local character = player.Character
                 if not character then
                     player.CharacterAdded:Connect(function()
@@ -499,9 +489,7 @@ EspTab:Toggle({
                     end)
                     return
                 end
-
                 createPlayerESP(player)
-                updatePlayerESP(player)
             end
 
             -- 初始化现有玩家
@@ -511,31 +499,25 @@ EspTab:Toggle({
                 end
             end
 
-            local playerAddedConn = Players.PlayerAdded:Connect(function(player)
+            espData.playerAddedConn = Players.PlayerAdded:Connect(function(player)
                 if player == LocalPlayer then return end
                 pcall(setupPlayerESP, player)
             end)
 
-            local playerRemovingConn = Players.PlayerRemoving:Connect(function(player)
-                cleanPlayerESP(player)
-            end)
+            espData.playerRemovingConn = Players.PlayerRemoving:Connect(cleanPlayerESP)
 
             -- 枪支ESP
-            local gunEspData = nil
-            local gunDropCache = nil
-
             local function clearGunESP()
-                if gunEspData then
-                    if gunEspData.highlight then gunEspData.highlight:Destroy() end
-                    if gunEspData.billboard then gunEspData.billboard:Destroy() end
-                    gunEspData = nil
+                if espData.gunEsp then
+                    if espData.gunEsp.highlight then espData.gunEsp.highlight:Destroy() end
+                    if espData.gunEsp.billboard then espData.gunEsp.billboard:Destroy() end
+                    espData.gunEsp = nil
                 end
-                gunDropCache = nil
+                espData.gunCache = nil
             end
 
             local function createGunESP(gunDrop)
                 clearGunESP()
-
                 local gunPart = nil
                 if gunDrop:IsA("BasePart") then
                     gunPart = gunDrop
@@ -550,11 +532,8 @@ EspTab:Toggle({
                         end
                     end
                 end
-
                 if not gunPart then return false end
-
                 local gunModel = gunDrop
-
                 local highlight = Instance.new("Highlight")
                 highlight.Name = "DroppedGunHighlight"
                 highlight.FillColor = Color3.fromRGB(255, 200, 50)
@@ -596,61 +575,51 @@ EspTab:Toggle({
                 textLabel.TextYAlignment = Enum.TextYAlignment.Center
                 textLabel.Parent = frame
 
-                gunEspData = {
+                espData.gunEsp = {
                     highlight = highlight,
                     billboard = billboard,
                     textLabel = textLabel,
                     part = gunPart,
                     model = gunModel
                 }
-                gunDropCache = gunDrop
+                espData.gunCache = gunDrop
                 return true
             end
 
             local function updateGunESP()
                 local gunDrop = Workspace:FindFirstChild("GunDrop", true)
-
                 if gunDrop then
-                    if gunDropCache ~= gunDrop then
+                    if espData.gunCache ~= gunDrop then
                         clearGunESP()
                         createGunESP(gunDrop)
                     end
-
-                    if gunEspData and gunEspData.part and gunEspData.part.Parent then
+                    if espData.gunEsp and espData.gunEsp.part and espData.gunEsp.part.Parent then
                         local localChar = LocalPlayer.Character
                         if localChar then
                             local localRoot = localChar:FindFirstChild("HumanoidRootPart")
                             if localRoot then
-                                local dist = (localRoot.Position - gunEspData.part.Position).Magnitude
-                                gunEspData.textLabel.Text = string.format("枪 (%.0fm)", dist)
+                                local dist = (localRoot.Position - espData.gunEsp.part.Position).Magnitude
+                                espData.gunEsp.textLabel.Text = string.format("枪 (%.0fm)", dist)
                             end
                         end
                     end
                 else
-                    if gunDropCache then
+                    if espData.gunCache then
                         clearGunESP()
                     end
                 end
             end
 
-            local heartbeatConn = RunService.Heartbeat:Connect(function()
-                for player, data in pairs(playerEspData) do
+            espData.heartbeatConn = RunService.Heartbeat:Connect(function()
+                for player, data in pairs(espData.playerEspMap) do
                     pcall(updatePlayerDistance, player, data)
                 end
                 pcall(updateGunESP)
             end)
 
-            -- 保存状态
-            espState.running = true
-            espState.heartbeatConn = heartbeatConn
-            espState.playerAddedConn = playerAddedConn
-            espState.playerRemovingConn = playerRemovingConn
-            espState.playerEspData = playerEspData
-            espState.gunEspData = gunEspData
-            espState.gunDropCache = gunDropCache
-            
+            espData.running = true
         else
-            -- 关闭透视：彻底清理所有资源
+            -- 关闭透视：彻底清理
             stopESP()
         end
     end
@@ -749,7 +718,7 @@ BulletTab:Toggle({
                             if not char then return nil end
                             local root = char:FindFirstChild("HumanoidRootPart")
                             if not root then return nil end
-                            -- 瞄准躯干（胸部）：RootPart位置向下偏移1单位
+                            -- 瞄准躯干（胸部）：向下偏移 1 单位
                             return root.Position - Vector3.new(0, 1, 0)
                         end
 
