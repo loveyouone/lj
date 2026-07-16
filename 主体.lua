@@ -2,29 +2,22 @@
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 WindUI:SetNotificationLower(true)
 
--- 窗口（无图标）
+-- 窗口
 local Window = WindUI:CreateWindow({
     Title = "MM2 工具集",
     Author = "by 用户"
 })
 
--- 透明背景
 Window:ToggleTransparency(true)
 
--- ===== 单一功能标签页 =====
-local MainTab = Window:Tab({
-    Title = "功能",
-    Icon = "settings"
-})
-
--- 移动增强
-local MoveSection = MainTab:Section({
+-- ===== 移动增强标签页 =====
+local MoveTab = Window:Tab({
     Title = "移动增强"
 })
 
 local infJumpEnabled = false
 local infJumpConn
-MoveSection:Toggle({
+MoveTab:Toggle({
     Title = "无限跳跃",
     Callback = function(v)
         infJumpEnabled = v
@@ -53,7 +46,7 @@ MoveSection:Toggle({
 
 local noClipEnabled = false
 local noClipConn
-MoveSection:Toggle({
+MoveTab:Toggle({
     Title = "穿墙",
     Callback = function(v)
         noClipEnabled = v
@@ -91,7 +84,7 @@ MoveSection:Toggle({
 
 local xrayEnabled = false
 local xrayConn
-MoveSection:Toggle({
+MoveTab:Toggle({
     Title = "透视",
     Callback = function(v)
         xrayEnabled = v
@@ -127,7 +120,7 @@ MoveSection:Toggle({
     end
 })
 
-MoveSection:Slider({
+MoveTab:Slider({
     Title = "移动速度",
     Step = 1,
     Value = {
@@ -146,7 +139,7 @@ MoveSection:Slider({
     end
 })
 
-MoveSection:Slider({
+MoveTab:Slider({
     Title = "跳跃高度",
     Step = 1,
     Value = {
@@ -165,22 +158,23 @@ MoveSection:Slider({
     end
 })
 
--- 透视功能（一键开启）
-local EspSection = MainTab:Section({
-    Title = "玩家与枪支透视"
+-- ===== 透视标签页 =====
+local EspTab = Window:Tab({
+    Title = "透视"
 })
 
 local espEnabled = false
 local espCleanup = nil
+local espConnections = {}
 
-EspSection:Toggle({
-    Title = "一键开启透视",
+EspTab:Toggle({
+    Title = "开启透视",
     Callback = function(v)
         espEnabled = v
         if v then
             if not _G.ESP_RUNNING then
                 _G.ESP_RUNNING = true
-                -- 执行 ESP 初始化（复制自 mm2.lua）
+                
                 local Players = game:GetService("Players")
                 local RunService = game:GetService("RunService")
                 local Workspace = game:GetService("Workspace")
@@ -403,12 +397,12 @@ EspSection:Toggle({
                     end
                 end
 
-                Players.PlayerAdded:Connect(function(player)
+                local playerAddedConn = Players.PlayerAdded:Connect(function(player)
                     if player == LocalPlayer then return end
                     pcall(setupPlayerESP, player)
                 end)
 
-                Players.PlayerRemoving:Connect(cleanPlayerESP)
+                local playerRemovingConn = Players.PlayerRemoving:Connect(cleanPlayerESP)
 
                 local gunEspData = nil
                 local gunDropCache = nil
@@ -522,7 +516,6 @@ EspSection:Toggle({
                     end
                 end
 
-                -- 连接更新循环
                 local heartbeatConn = RunService.Heartbeat:Connect(function()
                     for player, data in pairs(playerEspData) do
                         pcall(updatePlayerDistance, player, data)
@@ -530,9 +523,17 @@ EspSection:Toggle({
                     pcall(updateGunESP)
                 end)
 
-                _G.ESP_HEARTBEAT = heartbeatConn
+                -- 保存所有连接以便彻底清理
+                _G.ESP_CONNECTIONS = {
+                    heartbeat = heartbeatConn,
+                    playerAdded = playerAddedConn,
+                    playerRemoving = playerRemovingConn,
+                }
+                _G.ESP_PLAYER_DATA = playerEspData
                 _G.ESP_CLEANUP = function()
                     heartbeatConn:Disconnect()
+                    playerAddedConn:Disconnect()
+                    playerRemovingConn:Disconnect()
                     for player, data in pairs(playerEspData) do
                         cleanPlayerESP(player)
                     end
@@ -544,22 +545,22 @@ EspSection:Toggle({
             if _G.ESP_CLEANUP then
                 _G.ESP_CLEANUP()
                 _G.ESP_RUNNING = false
-                _G.ESP_HEARTBEAT = nil
+                _G.ESP_CONNECTIONS = nil
                 _G.ESP_CLEANUP = nil
             end
         end
     end
 })
 
--- 子弹追踪
-local BulletSection = MainTab:Section({
+-- ===== 子弹追踪标签页 =====
+local BulletTab = Window:Tab({
     Title = "子弹追踪"
 })
 
 local bulletEnabled = false
 local shootGui = nil
 
-BulletSection:Toggle({
+BulletTab:Toggle({
     Title = "开启子弹追踪",
     Callback = function(v)
         bulletEnabled = v
@@ -622,7 +623,6 @@ BulletSection:Toggle({
                 if gameProcessed then return end
                 if input.UserInputType == Enum.UserInputType.Touch then
                     if not isDragging then
-                        -- 射击逻辑
                         local function getMurderer()
                             for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
                                 if player ~= game.Players.LocalPlayer then
@@ -695,12 +695,12 @@ BulletSection:Toggle({
     end
 })
 
--- 传送
-local TeleportSection = MainTab:Section({
+-- ===== 传送标签页 =====
+local TeleportTab = Window:Tab({
     Title = "传送"
 })
 
-TeleportSection:Button({
+TeleportTab:Button({
     Title = "传送到枪支",
     Callback = function()
         local gunDrop = workspace:FindFirstChild("GunDrop", true)
@@ -719,7 +719,7 @@ TeleportSection:Button({
     end
 })
 
-TeleportSection:Button({
+TeleportTab:Button({
     Title = "传送到警长",
     Callback = function()
         for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
@@ -740,7 +740,7 @@ TeleportSection:Button({
     end
 })
 
-TeleportSection:Button({
+TeleportTab:Button({
     Title = "传送到杀手",
     Callback = function()
         for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
@@ -761,7 +761,7 @@ TeleportSection:Button({
     end
 })
 
-TeleportSection:Button({
+TeleportTab:Button({
     Title = "传送到出生点",
     Callback = function()
         for _, obj in ipairs(workspace:GetDescendants()) do
@@ -779,15 +779,15 @@ TeleportSection:Button({
     end
 })
 
--- 杀手功能
-local MurderSection = MainTab:Section({
+-- ===== 杀手功能标签页 =====
+local MurderTab = Window:Tab({
     Title = "杀手功能"
 })
 
 local killAllEnabled = false
 local killAllConn
 
-MurderSection:Toggle({
+MurderTab:Toggle({
     Title = "自动杀死全部玩家",
     Callback = function(v)
         killAllEnabled = v
