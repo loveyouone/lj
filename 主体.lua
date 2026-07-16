@@ -2,36 +2,33 @@
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 WindUI:SetNotificationLower(true)
 
--- 窗口
+-- 窗口（无图标）
 local Window = WindUI:CreateWindow({
     Title = "MM2 工具集",
-    Icon = "target",
     Author = "by 用户"
 })
 
 -- 透明背景
 Window:ToggleTransparency(true)
 
--- ===== 基本功能标签页 =====
-local BasicTab = Window:Tab({
-    Title = "基本功能",
+-- ===== 单一功能标签页 =====
+local MainTab = Window:Tab({
+    Title = "功能",
     Icon = "settings"
 })
 
-local BasicSection = BasicTab:Section({
-    Title = "移动增强",
-    Icon = "move"
+-- 移动增强
+local MoveSection = MainTab:Section({
+    Title = "移动增强"
 })
 
--- 无限跳跃（开关）
 local infJumpEnabled = false
-BasicSection:Toggle({
+local infJumpConn
+MoveSection:Toggle({
     Title = "无限跳跃",
-    Desc = "在空中可以无限次跳跃",
     Callback = function(v)
         infJumpEnabled = v
         if v then
-            -- 连接跳跃事件
             if not infJumpConn then
                 infJumpConn = game:GetService("UserInputService").JumpRequest:Connect(function()
                     if infJumpEnabled then
@@ -54,12 +51,10 @@ BasicSection:Toggle({
     end
 })
 
--- 穿墙（开关）
 local noClipEnabled = false
 local noClipConn
-BasicSection:Toggle({
-    Title = "穿墙 (NoClip)",
-    Desc = "穿过墙壁和障碍物",
+MoveSection:Toggle({
+    Title = "穿墙",
     Callback = function(v)
         noClipEnabled = v
         if v then
@@ -81,7 +76,6 @@ BasicSection:Toggle({
             if noClipConn then
                 noClipConn:Disconnect()
                 noClipConn = nil
-                -- 恢复碰撞
                 local char = game.Players.LocalPlayer.Character
                 if char then
                     for _, part in ipairs(char:GetDescendants()) do
@@ -95,60 +89,46 @@ BasicSection:Toggle({
     end
 })
 
--- 透视（开关）
 local xrayEnabled = false
-BasicSection:Toggle({
-    Title = "透视 (Xray)",
-    Desc = "透视场景中的物体",
+local xrayConn
+MoveSection:Toggle({
+    Title = "透视",
     Callback = function(v)
         xrayEnabled = v
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj:IsA("BasePart") then
-                local isPlayer = obj:FindFirstAncestorOfClass("Model") and game:GetService("Players"):GetPlayerFromCharacter(obj:FindFirstAncestorOfClass("Model"))
-                if not isPlayer then
-                    obj.LocalTransparencyModifier = v and 0.4 or 0
-                end
-            end
-        end
-    end
-})
-
--- 触碰飞行（开关）
-local flingEnabled = false
-local flingConn
-BasicSection:Toggle({
-    Title = "触碰飞行 (Touch Fling)",
-    Desc = "触碰物体时获得巨大速度",
-    Callback = function(v)
-        flingEnabled = v
         if v then
-            if not flingConn then
-                flingConn = game:GetService("RunService").Heartbeat:Connect(function()
-                    if flingEnabled then
-                        local char = game.Players.LocalPlayer.Character
-                        if char then
-                            local hrp = char:FindFirstChild("HumanoidRootPart")
-                            if hrp then
-                                local vel = hrp.AssemblyLinearVelocity
-                                hrp.AssemblyLinearVelocity = Vector3.new(vel.X * 1.5, 50, vel.Z * 1.5)
+            if not xrayConn then
+                xrayConn = game:GetService("RunService").Heartbeat:Connect(function()
+                    if xrayEnabled then
+                        for _, obj in ipairs(workspace:GetDescendants()) do
+                            if obj:IsA("BasePart") then
+                                local isPlayer = obj:FindFirstAncestorOfClass("Model") and game:GetService("Players"):GetPlayerFromCharacter(obj:FindFirstAncestorOfClass("Model"))
+                                if not isPlayer then
+                                    obj.LocalTransparencyModifier = 0.4
+                                end
                             end
                         end
                     end
                 end)
             end
         else
-            if flingConn then
-                flingConn:Disconnect()
-                flingConn = nil
+            if xrayConn then
+                xrayConn:Disconnect()
+                xrayConn = nil
+                for _, obj in ipairs(workspace:GetDescendants()) do
+                    if obj:IsA("BasePart") then
+                        local isPlayer = obj:FindFirstAncestorOfClass("Model") and game:GetService("Players"):GetPlayerFromCharacter(obj:FindFirstAncestorOfClass("Model"))
+                        if not isPlayer then
+                            obj.LocalTransparencyModifier = 0
+                        end
+                    end
+                end
             end
         end
     end
 })
 
--- 移动速度滑块
-BasicSection:Slider({
+MoveSection:Slider({
     Title = "移动速度",
-    Desc = "调整行走速度",
     Step = 1,
     Value = {
         Min = 16,
@@ -166,10 +146,8 @@ BasicSection:Slider({
     end
 })
 
--- 跳跃增强滑块
-BasicSection:Slider({
+MoveSection:Slider({
     Title = "跳跃高度",
-    Desc = "调整跳跃高度",
     Step = 1,
     Value = {
         Min = 50,
@@ -187,32 +165,19 @@ BasicSection:Slider({
     end
 })
 
--- ===== 透视标签页 =====
-local EspTab = Window:Tab({
-    Title = "透视",
-    Icon = "eye"
+-- 透视功能（一键开启）
+local EspSection = MainTab:Section({
+    Title = "玩家与枪支透视"
 })
 
-local EspSection = EspTab:Section({
-    Title = "玩家与枪支透视",
-    Icon = "eye"
-})
-
--- 一键开启透视（开关）
 local espEnabled = false
-local espConnections = {}
-local espCleanup = function() end
+local espCleanup = nil
 
 EspSection:Toggle({
     Title = "一键开启透视",
-    Desc = "显示所有玩家和掉落枪支的位置",
     Callback = function(v)
         espEnabled = v
         if v then
-            -- 启动 ESP（使用 mm2.lua 中的逻辑）
-            -- 由于 mm2.lua 中的 ESP 是持续运行的，我们将其封装为启动和停止函数
-            -- 但为了简单，我们直接复制 mm2.lua 中的相关代码并在此处执行
-            -- 注意：需要避免重复创建，这里用全局变量控制
             if not _G.ESP_RUNNING then
                 _G.ESP_RUNNING = true
                 -- 执行 ESP 初始化（复制自 mm2.lua）
@@ -565,9 +530,7 @@ EspSection:Toggle({
                     pcall(updateGunESP)
                 end)
 
-                -- 保存连接以便关闭
                 _G.ESP_HEARTBEAT = heartbeatConn
-                _G.ESP_PLAYER_DATA = playerEspData
                 _G.ESP_CLEANUP = function()
                     heartbeatConn:Disconnect()
                     for player, data in pairs(playerEspData) do
@@ -578,7 +541,6 @@ EspSection:Toggle({
                 end
             end
         else
-            -- 关闭 ESP
             if _G.ESP_CLEANUP then
                 _G.ESP_CLEANUP()
                 _G.ESP_RUNNING = false
@@ -589,28 +551,19 @@ EspSection:Toggle({
     end
 })
 
--- ===== 子弹追踪标签页 =====
-local BulletTab = Window:Tab({
-    Title = "子弹追踪",
-    Icon = "crosshair"
-})
-
-local BulletSection = BulletTab:Section({
-    Title = "自动瞄准杀手",
-    Icon = "target"
+-- 子弹追踪
+local BulletSection = MainTab:Section({
+    Title = "子弹追踪"
 })
 
 local bulletEnabled = false
-local shootButton = nil
 local shootGui = nil
 
 BulletSection:Toggle({
     Title = "开启子弹追踪",
-    Desc = "开启后显示射击按钮，点击自动瞄准杀手",
     Callback = function(v)
         bulletEnabled = v
         if v then
-            -- 创建射击按钮（参考 mm2.lua 中的按钮创建）
             local playerGui = game.Players.LocalPlayer:WaitForChild("PlayerGui")
             local screenGui = Instance.new("ScreenGui")
             screenGui.Name = "AimBot"
@@ -634,7 +587,6 @@ BulletSection:Toggle({
             corner.CornerRadius = UDim.new(0, 12)
             corner.Parent = button
 
-            -- 拖拽逻辑（移动端）
             local isDragging = false
             local isPressed = false
             local dragStartPos = nil
@@ -733,34 +685,23 @@ BulletSection:Toggle({
                 end
             end)
 
-            shootButton = button
             shootGui = screenGui
         else
-            -- 关闭子弹追踪，移除按钮
             if shootGui then
                 shootGui:Destroy()
                 shootGui = nil
-                shootButton = nil
             end
         end
     end
 })
 
--- ===== 传送标签页 =====
-local TeleportTab = Window:Tab({
-    Title = "传送",
-    Icon = "map-pin"
+-- 传送
+local TeleportSection = MainTab:Section({
+    Title = "传送"
 })
 
-local TeleportSection = TeleportTab:Section({
-    Title = "快速传送",
-    Icon = "map"
-})
-
--- 传送到枪支
 TeleportSection:Button({
     Title = "传送到枪支",
-    Desc = "传送到掉落枪支的位置",
     Callback = function()
         local gunDrop = workspace:FindFirstChild("GunDrop", true)
         if gunDrop then
@@ -778,10 +719,8 @@ TeleportSection:Button({
     end
 })
 
--- 传送到警长
 TeleportSection:Button({
     Title = "传送到警长",
-    Desc = "传送到持有警长枪的玩家",
     Callback = function()
         for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
             if player ~= game.Players.LocalPlayer then
@@ -801,10 +740,8 @@ TeleportSection:Button({
     end
 })
 
--- 传送到杀手
 TeleportSection:Button({
     Title = "传送到杀手",
-    Desc = "传送到持有杀手刀的玩家",
     Callback = function()
         for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
             if player ~= game.Players.LocalPlayer then
@@ -824,10 +761,8 @@ TeleportSection:Button({
     end
 })
 
--- 传送到出生点
 TeleportSection:Button({
     Title = "传送到出生点",
-    Desc = "传送到地图的出生点",
     Callback = function()
         for _, obj in ipairs(workspace:GetDescendants()) do
             if obj:IsA("BasePart") and obj.Name:lower():find("spawn") then
@@ -844,24 +779,16 @@ TeleportSection:Button({
     end
 })
 
--- ===== 杀手功能标签页 =====
-local MurderTab = Window:Tab({
-    Title = "杀手功能",
-    Icon = "skull"
+-- 杀手功能
+local MurderSection = MainTab:Section({
+    Title = "杀手功能"
 })
 
-local MurderSection = MurderTab:Section({
-    Title = "自动击杀",
-    Icon = "sword"
-})
-
--- 自动杀死全部玩家
 local killAllEnabled = false
 local killAllConn
 
 MurderSection:Toggle({
     Title = "自动杀死全部玩家",
-    Desc = "自动传送到每个玩家并击杀",
     Callback = function(v)
         killAllEnabled = v
         if v then
@@ -879,7 +806,6 @@ MurderSection:Toggle({
                                         if targetChar and targetChar:FindFirstChild("HumanoidRootPart") then
                                             hrp.CFrame = targetChar.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
                                             task.wait(0.1)
-                                            -- 这里可能需要调用击杀逻辑，但通常需要手动攻击，这里仅传送
                                         end
                                     end
                                 end
